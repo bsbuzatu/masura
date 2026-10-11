@@ -5,11 +5,14 @@ import { Player } from './engine.js';
 // ================= SCENĂ =================
 export function PlayView(a, b, ctx) {
   const { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B } = ctx;
+  const monitor = !!ctx.monitor;      // monitor = doar afișare, comandat de la distanță
+  const broadcast = ctx.broadcast;    // master: transmite starea către monitoare (opțional)
   // /scena/<setlistId> sau /scena/piesa/<songId>
-  let title, songs;
-  if (a === 'piesa') { const s = store.song(b); songs = s ? [s] : []; title = 'Test piesă'; }
+  let title = '', songs = [];
+  if (monitor) { songs = []; }
+  else if (a === 'piesa') { const s = store.song(b); songs = s ? [s] : []; title = 'Test piesă'; }
   else { const sl = store.setlist(a); songs = sl ? sl.songIds.map(id => store.song(id)).filter(Boolean) : []; title = sl ? sl.name : ''; }
-  if (!songs.length) { go('/concerte'); return {}; }
+  if (!monitor && !songs.length) { go('/concerte'); return {}; }
 
   let idx = 0;
   let state = 'ready'; // ready | playing | done
@@ -20,15 +23,17 @@ export function PlayView(a, b, ctx) {
   let lastShown = {};
   let bPressAt = 0;
 
-  const player = new Player(engine, { onBeat: ev => showBeat(ev), onEnd: () => songEnded() });
+  const handlers = { onBeat: ev => showBeat(ev), onEnd: () => songEnded() };
+  const player = ctx.makePlayer ? ctx.makePlayer(handlers) : new Player(engine, handlers);
 
-  app.innerHTML = `<div class="play" id="play">
+  app.innerHTML = `<div class="play ${monitor ? 'monitor' : ''}" id="play">
     <header class="p-top">
       <button class="x" data-a="exit" aria-label="Ieși">✕</button>
       <div class="where num" id="where"></div>
       <div class="title" id="ttl"></div>
       <div class="meta num" id="meta"></div>
       <button class="x" data-a="vol" aria-label="Volum">🔊</button>
+      <div class="link-dot" id="linkdot" hidden></div>
     </header>
     <main class="p-main">
       <section class="p-now" id="now"><div class="flash" id="flash"></div><div class="bar-c" id="barc"></div><div id="nowc"></div></section>
@@ -133,9 +138,24 @@ export function PlayView(a, b, ctx) {
   }
   const secBarsLabel = sec => sec.open ? '↻ deschisă' : sec.bars === 1 ? '1 măsură' : `${sec.bars} măsuri`;
 
+  function showWaiting(msg) {
+    state = 'ready';
+    player.stop(); player.lastBeatTime = -1; els.flash.style.opacity = 0;
+    $('#where').textContent = 'MONITOR';
+    $('#ttl').textContent = title || '';
+    $('#meta').innerHTML = '';
+    els.strip.innerHTML = ''; cells = [];
+    els.now.className = 'p-now';
+    els.barc.style.background = 'transparent';
+    els.nowc.innerHTML = `<div class="p-ready"><div class="big">${esc(msg)}</div></div>`;
+    els.bcur.textContent = '–'; els.btot.textContent = '';
+    dots(4);
+  }
+
   function showReady() {
     state = 'ready';
     const s = song();
+    if (!s) { showWaiting('Aștept…'); return; }
     header();
     buildStrip();
     lastShown = {};
@@ -153,6 +173,19 @@ export function PlayView(a, b, ctx) {
     const first = s.sections[0];
     setNext('ÎNCEPE CU', first ? first.name : '—', first ? secBarsLabel(first) : '', false);
     updateControls();
+    emit();
+  }
+
+  // ---- transmisie către monitoare (doar pe master) ----
+  let t0 = 0;
+  function emit() {
+    if (!broadcast) return;
+    const s = song();
+    broadcast.send({
+      type: 'state', setlist: title, idx, total: songs.length, finishedAll,
+      song: s && { title: s.title, bpm: s.bpm, num: s.num, den: s.den, countPrep: s.countPrep, countSticks: s.countSticks, notes: s.notes, sections: s.sections },
+      state, t0: state === 'playing' ? t0 : 0, armed: state === 'playing' ? player.armed : null,
+    });
   }
 
   function updateControls() {
@@ -249,6 +282,7 @@ export function PlayView(a, b, ctx) {
   function songEnded() {
     player.stop();
     player.lastBeatTime = -1; els.flash.style.opacity = 0;
+    if (monitor) { runKey = ''; showWaiting(idx < songs.length - 1 ? 'Urmează piesa următoare…' : '✓ Final de concert'); return; }
     if (idx < songs.length - 1) { idx++; finishedAll = false; }
     else finishedAll = true;
     showReady();
@@ -266,8 +300,11 @@ export function PlayView(a, b, ctx) {
       const ok = await player.start();
       if (!ok) { toast('Piesa nu are secțiuni'); return; }
       state = 'playing';
+      const first = player.queue && player.queue[0];
+      t0 = first ? Date.now() + (first.time - engine.audibleNow()) * 1000 : Date.now();
       keepAwake();
       updateControls();
+      emit();
       if (!audioOk) toast('Sunetul nu a pornit — oprește și apasă din nou START');
     } finally { starting = false; }
   }
@@ -278,7 +315,7 @@ export function PlayView(a, b, ctx) {
   function actionA() {
     if (state !== 'playing') { start(); return; }
     const r = player.arm();
-    if (r === 'armed') { lastShown.key = null; if (player.current) showBeat(player.current); }
+    if (r === 'armed') { lastShown.key = null; if (player.current) showBeat(player.current); emit(); }
     updateControls();
   }
   function actionB() {
@@ -295,6 +332,7 @@ export function PlayView(a, b, ctx) {
   const keyA = k => DEFAULT_KEYS_A.includes(k) || S.keysA.includes(k);
   const keyB = k => DEFAULT_KEYS_B.includes(k) || S.keysB.includes(k);
   const onKey = e => {
+    if (monitor) return;
     if (e.repeat) { e.preventDefault(); return; }
     if (e.target.closest && e.target.closest('input,textarea,select')) return;
     if (keyA(e.key)) { e.preventDefault(); actionA(); }
@@ -350,11 +388,43 @@ export function PlayView(a, b, ctx) {
   const onResize = () => { els.strip.style.transition = 'none'; moveStrip(stripPos[0], stripPos[1]); requestAnimationFrame(() => { els.strip.style.transition = ''; }); };
   window.addEventListener('resize', onResize);
 
-  showReady();
-  engine.unlock();
+  // ---- monitor: aplică starea primită de la master ----
+  let runKey = '', readyKey = '';
+  function apply(m) {
+    if (!m || m.type !== 'state' || !m.song) { runKey = ''; readyKey = ''; title = (m && m.setlist) || title; showWaiting(m && m.type === 'idle' ? 'Aștept să intre pe scenă…' : 'Aștept…'); return; }
+    title = m.setlist || '';
+    songs = new Array(Math.max(1, m.total || 1));
+    idx = Math.min(m.idx || 0, songs.length - 1);
+    songs[idx] = m.song;
+    finishedAll = !!m.finishedAll;
+    if (m.state === 'playing' && m.t0) {
+      const key = `${idx}:${m.t0}`;
+      if (key !== runKey) {
+        runKey = key; readyKey = '';
+        lastShown = {};
+        header(); buildStrip();
+        player.load(m.song);
+        player.startAt(m.t0, m.armed);
+        state = 'playing';
+      } else player.setArmed(m.armed);
+    } else {
+      // starea „pregătit” se re-trimite periodic: re-desenăm doar dacă s-a schimbat ceva
+      const rk = JSON.stringify([idx, finishedAll, m.song]);
+      if (!runKey && rk === readyKey && state === 'ready') return;
+      readyKey = rk; runKey = '';
+      player.stop(); player.lastBeatTime = -1; els.flash.style.opacity = 0;
+      showReady();
+    }
+  }
+
+  if (monitor) showWaiting('Mă conectez…');
+  else { showReady(); engine.unlock(); }
 
   return {
+    apply,
+    showWaiting,
     destroy() {
+      if (broadcast) broadcast.send({ type: 'idle', setlist: title });
       player.stop();
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);
