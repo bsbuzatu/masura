@@ -2,13 +2,40 @@
 import { Store, SECTION_TYPES, colorFor, baseName, uid, newSong, newSetlist, songStats, fmtDuration, clamp } from './store.js';
 import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
+import { Broadcaster, newCode } from './share.js';
 
-export const APP_VERSION = '1.5.0';
+export const APP_VERSION = '1.6.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
 const app = document.getElementById('app');
 let current = null; // view activ (cu destroy opțional)
+
+// ---------- monitor pentru colegi: transmisie ----------
+if (!S.share) S.share = { enabled: false, code: '' };
+let broadcaster = null;
+let shareOnline = false;
+function setLinkDot() {
+  const d = document.getElementById('linkdot');
+  if (!d) return;
+  d.hidden = !broadcaster;
+  d.className = 'link-dot ' + (shareOnline ? 'on' : 'off');
+  d.title = shareOnline ? 'Monitor: transmite' : 'Monitor: fără internet';
+}
+function updateShare() {
+  const want = S.share.enabled && S.share.code;
+  if (want && (!broadcaster || broadcaster.code !== S.share.code)) {
+    if (broadcaster) broadcaster.close({ type: 'idle' });
+    broadcaster = new Broadcaster(S.share.code, ok => { shareOnline = ok; setLinkDot(); if (current && current.onShareStatus) current.onShareStatus(); });
+    broadcaster.code = S.share.code;
+    broadcaster.send({ type: 'idle', setlist: '' });
+  } else if (!want && broadcaster) {
+    broadcaster.close({ type: 'idle' });
+    broadcaster = null; shareOnline = false;
+  }
+  setLinkDot();
+}
+const monitorUrl = code => new URL('monitor.html#' + code, location.href.split('#')[0]).href;
 
 const DEFAULT_KEYS_A = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
 const DEFAULT_KEYS_B = ['ArrowLeft', 'ArrowUp', 'PageUp'];
@@ -59,7 +86,7 @@ function route() {
   if (a === 'piese') current = SongsView();
   else if (a === 'piesa') current = SongEditView(b);
   else if (a === 'concert') current = SetlistEditView(b);
-  else if (a === 'scena') current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B });
+  else if (a === 'scena') { current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B, broadcast: broadcaster }); setLinkDot(); }
   else if (a === 'setari') current = SettingsView();
   else current = SetlistsView();
 }
@@ -397,6 +424,24 @@ function SettingsView() {
     const extra = w === 'A' ? S.keysA : S.keysB;
     return def.map(k => `<span class="keycap">${esc(keyName(k))}</span>`).join('') + extra.map(k => `<span class="keycap" style="border-color:var(--accent)">${esc(keyName(k))}</span>`).join('');
   };
+  const shareHtml = () => {
+    const on = S.share.enabled && S.share.code;
+    if (!on) return `<div class="hint" style="margin:0 0 12px">Colegii văd pe telefonul lor exact ecranul tău de scenă (fără sunet), prin internet mobil. Funcționează pe orice telefon, într-un browser.</div>
+      <button class="btn primary" data-a="share-on">Activează monitorul</button>`;
+    return `<div class="row" style="align-items:flex-end;margin-bottom:10px">
+        <div><label class="f">Codul trupei</label><div class="share-code num">${esc(S.share.code)}</div></div>
+        <div class="spacer"></div>
+        <div class="share-st ${shareOnline ? 'on' : 'off'}">${shareOnline ? '● conectat' : '● fără internet'}</div>
+      </div>
+      <div class="hint" style="margin:0 0 12px;word-break:break-all">${esc(monitorUrl(S.share.code))}</div>
+      <div class="row">
+        <button class="btn primary" data-a="share-send">Trimite linkul</button>
+        <button class="btn" data-a="share-copy">Copiază</button>
+        <button class="btn ghost" data-a="share-new">Cod nou</button>
+        <button class="btn danger" data-a="share-off">Oprește</button>
+      </div>
+      <div class="hint">Trimite linkul pe grupul trupei. Colegii îl deschid în browser și văd ecranul tău de scenă. Aplicația transmite doar când ai internet (date mobile sau Wi-Fi) — în airplane mode nu. Ca să nu sune telefonul, folosește Do Not Disturb / Focus.</div>`;
+  };
   const render = () => {
     app.innerHTML = `<div class="shell"><div class="page">
       <div class="page-head"><h1>Setări</h1></div>
@@ -423,6 +468,9 @@ function SettingsView() {
         </div>
         <div class="hint" id="lastkey">Apasă orice buton al pedalei ca să vezi ce tastă trimite.</div>
       </div>
+
+      <h2 class="sec-h">Monitor pentru colegi</h2>
+      <div class="card" id="sharecard">${shareHtml()}</div>
 
       <h2 class="sec-h">Date</h2>
       <div class="card">
@@ -467,6 +515,15 @@ function SettingsView() {
     if (a === 'learnA' || a === 'learnB') { learn = a.slice(-1); stopTester(); render(); }
     if (a === 'resetkeys') { S.keysA = []; S.keysB = []; store.save(); render(); toast('Tastele au revenit la implicit'); }
     if (a === 'export') exportData();
+    if (a === 'share-on') { if (!S.share.code) S.share.code = newCode(); S.share.enabled = true; store.save(); updateShare(); render(); }
+    if (a === 'share-off') { S.share.enabled = false; store.save(); updateShare(); render(); }
+    if (a === 'share-new') { if (confirm('Generezi un cod nou? Colegii vor avea nevoie de linkul nou.')) { S.share.code = newCode(); store.save(); updateShare(); render(); } }
+    if (a === 'share-copy') { try { await navigator.clipboard.writeText(monitorUrl(S.share.code)); toast('Link copiat'); } catch (err) { prompt('Copiază linkul:', monitorUrl(S.share.code)); } }
+    if (a === 'share-send') {
+      const url = monitorUrl(S.share.code);
+      if (navigator.share) { try { await navigator.share({ title: 'Măsura · monitor', text: `Monitor trupă (cod ${S.share.code}):`, url }); } catch (err) { /* anulat */ } }
+      else { try { await navigator.clipboard.writeText(url); toast('Link copiat'); } catch (err) { prompt('Copiază linkul:', url); } }
+    }
     if (a === 'import-merge' || a === 'import-replace') {
       const f = $('#file');
       f.onchange = async () => {
@@ -498,7 +555,10 @@ function SettingsView() {
     learn = null; render();
   };
   window.addEventListener('keydown', onKey);
-  return { destroy() { stopTester(); window.removeEventListener('keydown', onKey); app.oninput = null; } };
+  return {
+    destroy() { stopTester(); window.removeEventListener('keydown', onKey); app.oninput = null; },
+    onShareStatus() { const c = document.getElementById('sharecard'); if (c) c.innerHTML = shareHtml(); },
+  };
 }
 
 async function exportData() {
@@ -518,6 +578,7 @@ async function exportData() {
 }
 
 // ---------- pornire ----------
+updateShare();
 route();
 // deblocare audio la primul gest (iOS)
 const unlockOnce = () => { engine.unlock(); };
