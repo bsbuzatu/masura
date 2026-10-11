@@ -1,6 +1,6 @@
 // Măsura — service worker: aplicația rulează complet offline după prima deschidere.
 // La fiecare versiune nouă, schimbă VERSION.
-const VERSION = 'masura-v1.1.0';
+const VERSION = 'masura-v1.2.0';
 const ASSETS = [
   './',
   './index.html',
