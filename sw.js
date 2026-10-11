@@ -1,6 +1,6 @@
 // Măsura — service worker: aplicația rulează complet offline după prima deschidere.
 // La fiecare versiune nouă, schimbă VERSION.
-const VERSION = 'masura-v1.3.0';
+const VERSION = 'masura-v1.4.0';
 const ASSETS = [
   './',
   './index.html',
@@ -17,7 +17,9 @@ const OPTIONAL = ['./icons/icon-192.png', './icons/icon-512.png', './icons/apple
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(VERSION)
-      .then(c => c.addAll(ASSETS).then(() => Promise.all(OPTIONAL.map(u => c.add(u).catch(() => {})))))
+      // cache: 'reload' = ia fișierele direct de pe server, nu din cache-ul vechi al telefonului
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))
+        .then(() => Promise.all(OPTIONAL.map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {})))))
       .then(() => self.skipWaiting())
   );
 });

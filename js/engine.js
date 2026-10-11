@@ -93,6 +93,7 @@ export class ClickEngine {
     g.gain.value = curve(level);
     src.connect(g); g.connect(this.out);
     src.start(Math.max(time, this.ctx.currentTime));
+    return src;
   }
 
   now() { return this.ctx ? this.ctx.currentTime : 0; }
@@ -123,8 +124,8 @@ function makeTicker(cb) {
   Player — rulează o piesă:
     count-in: `countPrep` timpi de pregătire + `countSticks` timpi bătuți cu bețele
     apoi secțiunile; secțiunile „deschise” se repetă măsură cu măsură până la armare.
-  Armare (varianta B): la apăsare în măsura k a unei secțiuni deschise,
-    măsura k+1 devine ultima, apoi intră secțiunea următoare.
+  Armare: la apăsare în măsura k a unei secțiuni deschise, măsura k devine ultima
+    (se termină măsura curentă, apoi intră secțiunea următoare).
 
   Evenimente către UI (sincronizate cu ce se aude):
     {kind:'prep', i, total} | {kind:'sticks', i, total} |
@@ -183,7 +184,25 @@ export class Player {
     const sec = this.song.sections[c.sec];
     if (!sec || !sec.open) return 'ignored';
     if (this.armed && this.armed.sec === c.sec) return 'already';
-    this.armed = { sec: c.sec, bar: c.bar + 1 };
+    this.armed = { sec: c.sec, bar: c.bar };
+    // Dacă programatorul a trecut deja (cu ~0,1 s înainte) în măsura următoare a secțiunii,
+    // retragem bătăile acelea încă neauzite și sărim direct la secțiunea următoare.
+    const p = this.pos;
+    if (this.playing && p.phase === 'song' && p.sec === c.sec && p.bar > c.bar) {
+      const keep = [];
+      let firstTime = null;
+      for (const ev of this.queue) {
+        if (ev.kind === 'beat' && ev.sec === c.sec && ev.bar > c.bar) {
+          if (firstTime === null) firstTime = ev.time;
+          (ev.srcs || []).forEach(x => { try { x.stop(); } catch (e) { /* ignore */ } });
+        } else keep.push(ev);
+      }
+      this.queue = keep;
+      if (firstTime !== null) this.nextTime = firstTime;
+      p.sec = c.sec + 1; p.bar = 0; p.beat = 0;
+      if (p.sec >= this.song.sections.length) p.phase = 'done';
+      this._schedule();
+    }
     return 'armed';
   }
   disarm() {
@@ -203,7 +222,7 @@ export class Player {
       ev.time = this.nextTime;
       this.queue.push(ev);
       if (ev.kind === 'end') { this.playing = false; this.ticker.stop(); break; }
-      this._sound(ev);
+      ev.srcs = this._sound(ev);
       this.nextTime += this.spb;
     }
   }
@@ -211,17 +230,20 @@ export class Player {
   _sound(ev) {
     const v = this.engine.vol;
     const t = ev.time;
+    const out = [];
+    const play = (k, tt, l) => { const x = this.engine.play(k, tt, l); if (x) out.push(x); };
     // count-in: mereu la volumul accentului, ca să se audă chiar dacă timpii 2-4 sunt pe 0
     const ci = Math.max(v.accent, v.beat, 0.5);
-    if (ev.kind === 'prep') this.engine.play(ev.i === 0 ? 'accent' : 'beat', t, ci);
-    else if (ev.kind === 'sticks') this.engine.play(ev.i === 0 ? 'accent' : 'beat', t, ci);
+    if (ev.kind === 'prep') play(ev.i === 0 ? 'accent' : 'beat', t, ci);
+    else if (ev.kind === 'sticks') play(ev.i === 0 ? 'accent' : 'beat', t, ci);
     else if (ev.kind === 'beat') {
-      if (ev.downbeat) this.engine.play('accent', t, v.accent);
-      else this.engine.play('beat', t, v.beat);
+      if (ev.downbeat) play('accent', t, v.accent);
+      else play('beat', t, v.beat);
     }
     if ((ev.kind === 'beat' || ev.kind === 'sticks') && v.sub > 0) {
-      this.engine.play('sub', t + this.spb / 2, v.sub);
+      play('sub', t + this.spb / 2, v.sub);
     }
+    return out;
   }
 
   _step() {
