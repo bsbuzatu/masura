@@ -81,11 +81,20 @@ export function PlayView(a, b, ctx) {
     stripPos = [sec, bar];
     const box = els.strip.parentElement;
     if (portrait()) {
-      // listă verticală: rândul curent stă la ~20% de sus, ca să se vadă ce urmează
+      // listă verticală: secțiunea curentă stă sus; la secțiunile lungi urmărim rândul măsurii curente
       const blk = sec >= 0 ? els.strip.children[sec] : null;
-      const y = blk ? blk.offsetTop : 0;
-      const max = Math.max(0, els.strip.scrollHeight - box.clientHeight);
-      const off = Math.min(max, Math.max(0, y - box.clientHeight * 0.2));
+      const h = box.clientHeight;
+      let off = 0;
+      if (blk) {
+        off = blk.offsetTop - h * 0.15;
+        const cell = cells[sec] && cells[sec][bar];
+        if (cell) {
+          const cy = blk.offsetTop + cell.offsetTop;
+          if (cy + cell.offsetHeight > off + h * 0.8) off = cy - h * 0.4;
+        }
+      }
+      const max = Math.max(0, els.strip.scrollHeight - h);
+      off = Math.min(max, Math.max(0, off));
       els.strip.style.transform = `translateY(${-Math.round(off)}px)`;
       return;
     }
