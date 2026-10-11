@@ -163,7 +163,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
 
 /* ---------- Ecran de scenă ---------- */
 .play {
-  position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100%); display: grid; overflow: hidden; user-select: none; -webkit-user-select: none;
+  position: fixed; inset: 0; display: grid; overflow: hidden; user-select: none; -webkit-user-select: none;
   grid-template-rows: auto minmax(0, 1fr) auto auto; grid-template-columns: minmax(0, 1fr);
   padding: calc(var(--sat) + 6px) calc(var(--sar) + 10px) calc(var(--sab) + 8px) calc(var(--sal) + 10px);
   gap: 8px; background: #050506; touch-action: manipulation;
