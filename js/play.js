@@ -75,14 +75,31 @@ export function PlayView(a, b, ctx) {
     moveStrip(-1, 0);
   }
   // poziția se citește din DOM, ca etichetele lungi să nu decaleze cursorul
+  const portrait = () => window.matchMedia('(orientation: portrait)').matches;
+  let stripPos = [-1, 0];
   function moveStrip(sec, bar) {
-    const w = els.strip.parentElement.clientWidth;
+    stripPos = [sec, bar];
+    const box = els.strip.parentElement;
+    if (portrait()) {
+      // listă verticală: rândul curent stă la ~20% de sus, ca să se vadă ce urmează
+      const blk = sec >= 0 ? els.strip.children[sec] : null;
+      const y = blk ? blk.offsetTop : 0;
+      const max = Math.max(0, els.strip.scrollHeight - box.clientHeight);
+      const off = Math.min(max, Math.max(0, y - box.clientHeight * 0.2));
+      els.strip.style.transform = `translateY(${-Math.round(off)}px)`;
+      return;
+    }
+    const w = box.clientWidth;
     const cell = sec >= 0 && cells[sec] ? cells[sec][bar] : null;
-    const x = cell ? cell.offsetLeft + cell.parentElement.offsetLeft + cell.parentElement.parentElement.offsetLeft : -CELL * 1.5;
-    els.strip.style.transform = `translateX(${Math.round(w * 0.3 - x - 9)}px)`;
+    const x = cell ? cell.offsetLeft + cell.parentElement.parentElement.offsetLeft : -CELL * 1.5;
+    els.strip.style.transform = `translateX(${Math.round(w * 0.3 - x - 11)}px)`;
   }
   function markCells(sec, bar) {
     const s = song();
+    [...els.strip.children].forEach((blk, si) => {
+      blk.classList.toggle('on', si === sec);
+      blk.classList.toggle('done', si < sec);
+    });
     cells.forEach((arr, si) => arr.forEach((c, bi) => {
       const open = s.sections[si].open;
       const isCur = si === sec && bi === (open ? bar % 4 : bar);
@@ -163,6 +180,7 @@ export function PlayView(a, b, ctx) {
         dots(ev.total);
         const f = s.sections[0];
         setNext('INTRĂ', f.name, secBarsLabel(f), true);
+        markCells(-1, 0);
         els.btot.textContent = '';
       }
       els.nowc.innerHTML = `<div class="sec-name num sticks-n">${ev.i + 1}</div><div class="status">Bețe pentru band</div>`;
@@ -229,16 +247,21 @@ export function PlayView(a, b, ctx) {
     if (!finishedAll) toast(`Piesa s-a terminat · urmează: ${song().title}`);
   }
 
+  let starting = false;
   async function start() {
-    if (state === 'playing') return;
-    await engine.unlock();
-    finishedAll = false;
-    player.load(song());
-    const ok = await player.start();
-    if (!ok) { toast('Piesa nu are secțiuni'); return; }
-    state = 'playing';
-    keepAwake();
-    updateControls();
+    if (state === 'playing' || starting) return;
+    starting = true;
+    try {
+      const audioOk = await engine.unlock();
+      finishedAll = false;
+      player.load(song());
+      const ok = await player.start();
+      if (!ok) { toast('Piesa nu are secțiuni'); return; }
+      state = 'playing';
+      keepAwake();
+      updateControls();
+      if (!audioOk) toast('Sunetul nu a pornit — oprește și apasă din nou START');
+    } finally { starting = false; }
   }
   function stop() {
     player.stop(); player.lastBeatTime = -1; els.flash.style.opacity = 0;
@@ -317,7 +340,7 @@ export function PlayView(a, b, ctx) {
     if (a === 'next' && state !== 'playing' && idx < songs.length - 1) { idx++; finishedAll = false; showReady(); }
   };
 
-  const onResize = () => { const c = player.current; if (state === 'playing' && c && c.kind === 'beat') moveStrip(c.sec, song().sections[c.sec].open ? c.bar % 4 : c.bar); else moveStrip(-1, 0); };
+  const onResize = () => { els.strip.style.transition = 'none'; moveStrip(stripPos[0], stripPos[1]); requestAnimationFrame(() => { els.strip.style.transition = ''; }); };
   window.addEventListener('resize', onResize);
 
   showReady();
