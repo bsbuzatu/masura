@@ -249,6 +249,22 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
 .p-now .sticks-n { font-size: clamp(70px, 34vh, 200px); color: var(--accent); }
 .p-now .status { overflow-wrap: anywhere; }
 
+/* indicator legătură monitor */
+.p-top { position: relative; }
+.link-dot { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #050506; font-size: 0; }
+.link-dot.on { background: var(--ok); }
+.link-dot.off { background: var(--danger); }
+.link-dot.wait { background: var(--muted); }
+.share-code { font-family: var(--display); font-size: 34px; font-weight: 900; letter-spacing: 0.12em; }
+.share-st { font-weight: 700; font-size: 14px; }
+.share-st.on { color: var(--ok); } .share-st.off { color: var(--danger); }
+
+/* monitor: fără comenzi */
+.play.monitor .p-ctl, .play.monitor .x { display: none; }
+.play.monitor { grid-template-rows: auto minmax(0, 1fr) auto; }
+.play.monitor .link-dot { position: static; width: auto; height: auto; border: 0; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 800; white-space: nowrap; color: #08110c; }
+.play.monitor .link-dot.off { color: #fff; }
+
 /* ---------- Scenă pe verticală (portrait) ---------- */
 @media (orientation: portrait) {
   .play {
@@ -310,6 +326,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
   .p-ctl button { font-size: clamp(14px, 4.4vw, 19px); }
   .vol-panel { left: calc(var(--sal) + 10px); right: calc(var(--sar) + 10px); width: auto; top: calc(var(--sat) + 64px); }
   .vol-panel .slider-row { grid-template-columns: 88px minmax(0, 1fr) 36px; }
+}
+
+@media (orientation: portrait) {
+  .play.monitor { grid-template-rows: auto auto minmax(0, 1fr); }
+  .play.monitor .p-top { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "title title dot" "where meta dot"; }
+  .play.monitor .link-dot { grid-area: dot; }
 }
 
 /* ecrane foarte mici (ex. iPhone SE) */
