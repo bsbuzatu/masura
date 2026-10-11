@@ -12,24 +12,34 @@ export class ClickEngine {
 
   get ready() { return !!this.ctx && this.ctx.state === 'running'; }
 
-  // Trebuie apelat dintr-un gest al utilizatorului (tap / tastă)
+  _create() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC({ latencyHint: 'interactive' });
+    this.createdAt = performance.now();
+    this.out = this.ctx.createGain();
+    this.out.gain.value = curve(this.vol.master);
+    this.out.connect(this.ctx.destination);
+    this.buffers = {
+      accent: this._tone(1760, 0.030, 0.10, 0.35),
+      beat: this._tone(1320, 0.024, 0.08, 0.28),
+      sub: this._tone(990, 0.016, 0.06, 0.20),
+    };
+  }
+
+  // Trebuie apelat dintr-un gest al utilizatorului (tap / tastă).
+  // Pe iOS, după o pauză contextul audio poate rămâne „suspended”/„interrupted”
+  // și resume() nu se mai rezolvă — atunci îl refacem, tot în gestul curent.
   async unlock() {
-    if (!this.ctx) {
-      // iOS 17+: ignoră comutatorul de silențios pentru sunetul aplicației
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
-      const AC = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AC({ latencyHint: 'interactive' });
-      this.out = this.ctx.createGain();
-      this.out.gain.value = curve(this.vol.master);
-      this.out.connect(this.ctx.destination);
-      this.buffers = {
-        accent: this._tone(1760, 0.030, 0.10, 0.35),
-        beat: this._tone(1320, 0.024, 0.08, 0.28),
-        sub: this._tone(990, 0.016, 0.06, 0.20),
-      };
+    // iOS 17+: ignoră comutatorul de silențios pentru sunetul aplicației
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
+    if (!this.ctx || this.ctx.state === 'closed') this._create();
+    else if (this.ctx.state !== 'running' && performance.now() - this.createdAt > 1500) {
+      const old = this.ctx;
+      this._create();
+      try { old.close(); } catch (e) { /* ignore */ }
     }
     if (this.ctx.state !== 'running') {
-      try { await this.ctx.resume(); } catch (e) { /* ignore */ }
+      try { this.ctx.resume(); } catch (e) { /* ignore */ }
     }
     // buffer mut — deblochează ieșirea audio pe iOS
     try {
@@ -37,6 +47,14 @@ export class ClickEngine {
       const s = this.ctx.createBufferSource();
       s.buffer = b; s.connect(this.ctx.destination); s.start(0);
     } catch (e) { /* ignore */ }
+    // așteptăm pornirea, dar niciodată la nesfârșit
+    if (this.ctx.state !== 'running') {
+      const ctx = this.ctx;
+      await new Promise(res => {
+        const t = setTimeout(res, 500);
+        ctx.addEventListener('statechange', function h() { if (ctx.state === 'running') { clearTimeout(t); ctx.removeEventListener('statechange', h); res(); } });
+      });
+    }
     return this.ready;
   }
 
@@ -132,7 +150,7 @@ export class Player {
 
   async start() {
     if (!this.song) return false;
-    await this.engine.unlock();
+    if (!this.engine.ready) await this.engine.unlock();
     const s = this.song;
     this.spb = 60 / s.bpm;
     this.pos = s.countPrep > 0 ? { phase: 'prep', i: 0 }
