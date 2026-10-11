@@ -3,7 +3,7 @@ import { Store, SECTION_TYPES, colorFor, baseName, uid, newSong, newSetlist, son
 import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.5.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -547,20 +547,4 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   });
   window.addEventListener('hashchange', applyUpdateIfSafe);
 }
-// iOS (aplicație instalată): uneori fereastra raportată e mai scurtă decât ecranul
-// și rămâne o bandă goală jos. Fixăm înălțimea la înălțimea reală a ecranului.
-function fixHeight() {
-  const standalone = navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-  let h = window.innerHeight;
-  if (standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
-    const portrait = window.matchMedia('(orientation: portrait)').matches;
-    const sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-    h = Math.max(h, sh);
-  }
-  document.documentElement.style.setProperty('--app-h', h + 'px');
-}
-fixHeight();
-window.addEventListener('resize', fixHeight);
-window.addEventListener('orientationchange', () => setTimeout(fixHeight, 300));
-
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
