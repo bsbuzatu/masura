@@ -23,7 +23,27 @@ export class ClickEngine {
       accent: this._tone(1760, 0.030, 0.10, 0.35),
       beat: this._tone(1320, 0.024, 0.08, 0.28),
       sub: this._tone(990, 0.016, 0.06, 0.20),
+      // count-in: tonuri moi, joase, fără transient — nu taie prin mix
+      ciPrep: this._soft(494, 0.06, 0.18),
+      ciStick: this._soft(392, 0.06, 0.18),
+      ciStickAcc: this._soft(523, 0.07, 0.20),
     };
+  }
+
+  // Ton moale: sinus pur, atac lent (4 ms), fără armonici înalte
+  _soft(freq, decay, dur) {
+    const sr = this.ctx.sampleRate;
+    const n = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, n, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const att = Math.min(1, t / 0.004);
+      d[i] = Math.sin(2 * Math.PI * freq * t) * att * Math.exp(-t / decay) * 0.8;
+    }
+    const f = Math.min(n, Math.floor(sr * 0.01));
+    for (let i = 0; i < f; i++) d[n - 1 - i] *= i / f;
+    return buf;
   }
 
   // Trebuie apelat dintr-un gest al utilizatorului (tap / tastă).
@@ -234,13 +254,13 @@ export class Player {
     const play = (k, tt, l) => { const x = this.engine.play(k, tt, l); if (x) out.push(x); };
     // count-in: mereu la volumul accentului, ca să se audă chiar dacă timpii 2-4 sunt pe 0
     const ci = Math.max(v.accent, v.beat, 0.5);
-    if (ev.kind === 'prep') play(ev.i === 0 ? 'accent' : 'beat', t, ci);
-    else if (ev.kind === 'sticks') play(ev.i === 0 ? 'accent' : 'beat', t, ci);
+    if (ev.kind === 'prep') play('ciPrep', t, ci);
+    else if (ev.kind === 'sticks') play(ev.i === 0 ? 'ciStickAcc' : 'ciStick', t, ci);
     else if (ev.kind === 'beat') {
       if (ev.downbeat) play('accent', t, v.accent);
       else play('beat', t, v.beat);
     }
-    if ((ev.kind === 'beat' || ev.kind === 'sticks') && v.sub > 0) {
+    if (ev.kind === 'beat' && v.sub > 0) {
       play('sub', t + this.spb / 2, v.sub);
     }
     return out;
