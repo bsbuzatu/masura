@@ -16,7 +16,6 @@ export function PlayView(a, b, ctx) {
   let finishedAll = false;
   let raf = 0;
   let cells = [];   // cells[sec][bar] → element
-  let secX = [];    // poziția x a fiecărei secțiuni în bandă
   const CELL = 20;  // 18 + gap 2
   let lastShown = {};
   let bPressAt = 0;
@@ -31,7 +30,6 @@ export function PlayView(a, b, ctx) {
       <div class="meta num" id="meta"></div>
       <button class="x" data-a="vol" aria-label="Volum">🔊</button>
     </header>
-    <div class="rotate-hint">Rotește telefonul în landscape pentru ecranul de scenă complet</div>
     <main class="p-main">
       <section class="p-now" id="now"><div class="flash" id="flash"></div><div class="bar-c" id="barc"></div><div id="nowc"></div></section>
       <aside class="p-side">
@@ -67,21 +65,20 @@ export function PlayView(a, b, ctx) {
 
   function buildStrip() {
     const s = song();
-    cells = []; secX = [];
-    let x = 0;
-    els.strip.innerHTML = s.sections.map((sec, si) => {
+    cells = [];
+    els.strip.innerHTML = s.sections.map(sec => {
       const n = sec.open ? 4 : sec.bars;
-      secX.push(x);
-      x += n * CELL + 8;
       const col = colorFor(sec.name);
-      return `<div class="s-blk ${sec.open ? 'open' : ''}"><div class="l">${esc(sec.name || '—')}${sec.open ? ' ↻' : ` ${sec.bars}`}</div><div class="cells">${Array.from({ length: n }, () => `<b style="background:${col}"></b>`).join('')}</div></div>`;
+      return `<div class="s-blk ${sec.open ? 'open' : ''}"><div class="l">${esc(sec.name || '—')}${sec.open ? ' ↻' : ''}</div><div class="cells">${Array.from({ length: n }, () => `<b style="background:${col}"></b>`).join('')}</div></div>`;
     }).join('');
     els.strip.querySelectorAll('.s-blk').forEach((blk, si) => { cells[si] = [...blk.querySelectorAll('.cells b')]; });
     moveStrip(-1, 0);
   }
+  // poziția se citește din DOM, ca etichetele lungi să nu decaleze cursorul
   function moveStrip(sec, bar) {
     const w = els.strip.parentElement.clientWidth;
-    let x = sec < 0 ? -CELL * 1.5 : secX[sec] + bar * CELL;
+    const cell = sec >= 0 && cells[sec] ? cells[sec][bar] : null;
+    const x = cell ? cell.offsetLeft + cell.parentElement.offsetLeft + cell.parentElement.parentElement.offsetLeft : -CELL * 1.5;
     els.strip.style.transform = `translateX(${Math.round(w * 0.3 - x - 9)}px)`;
   }
   function markCells(sec, bar) {
@@ -108,7 +105,7 @@ export function PlayView(a, b, ctx) {
     els.next.className = 'p-box p-next' + (hot ? ' hot' : '');
     els.next.innerHTML = `<div class="lbl">${esc(label)}</div><div class="nm">${esc(name)}</div>${bars ? `<div class="nb">${esc(bars)}</div>` : ''}`;
   }
-  const secBarsLabel = sec => sec.open ? '↻ deschisă' : `${sec.bars} măsuri`;
+  const secBarsLabel = sec => sec.open ? '↻ deschisă' : sec.bars === 1 ? '1 măsură' : `${sec.bars} măsuri`;
 
   function showReady() {
     state = 'ready';
