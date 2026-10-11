@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   flash: 0.7,
   keysA: [], // taste învățate în plus față de cele implicite
   keysB: [],
+  share: { enabled: false, code: '' }, // monitor pentru colegi
 };
 
 export function newSong(partial = {}) {
@@ -124,6 +125,7 @@ export class Store {
       d.setlists = d.setlists || [];
       d.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(d.settings || {}) };
       d.settings.vol = { ...DEFAULT_SETTINGS.vol, ...(d.settings.vol || {}) };
+      d.settings.share = { ...DEFAULT_SETTINGS.share, ...(d.settings.share || {}) };
       return d;
     } catch (e) {
       console.error(e);

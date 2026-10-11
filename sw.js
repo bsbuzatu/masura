@@ -1,6 +1,6 @@
 // Măsura — service worker: aplicația rulează complet offline după prima deschidere.
 // La fiecare versiune nouă, schimbă VERSION.
-const VERSION = 'masura-v1.5.0';
+const VERSION = 'masura-v1.6.0';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,10 @@ const ASSETS = [
   './js/engine.js',
   './js/store.js',
   './js/play.js',
+  './js/mqtt.js',
+  './js/share.js',
+  './js/monitor.js',
+  './monitor.html',
   './manifest.webmanifest',
 ];
 // iconițele se cachează dacă există, dar lipsa lor nu blochează instalarea offline
@@ -36,7 +40,11 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   if (req.mode === 'navigate') {
-    e.respondWith(caches.match('./index.html').then(r => r || fetch(req)));
+    // pagina cerută (index sau monitor); dacă nu e în cache, încercăm rețeaua, apoi index-ul
+    e.respondWith(
+      caches.match(req, { ignoreSearch: true })
+        .then(r => r || fetch(req).catch(() => caches.match('./index.html')))
+    );
     return;
   }
   e.respondWith(caches.match(req, { ignoreSearch: true }).then(r => r || fetch(req)));
