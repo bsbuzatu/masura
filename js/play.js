@@ -211,7 +211,6 @@ export function PlayView(a, b, ctx) {
         if (sec.open) {
           els.bcur.textContent = ev.bar + 1; els.btot.textContent = '↻';
           if (isLast) { els.now.className = 'p-now armed last-bar'; st.innerHTML = `<span style="color:var(--armed)">ULTIMA MĂSURĂ → ${esc(nxt ? nxt.name : 'FINAL')}</span>`; }
-          else if (armed) { els.now.className = 'p-now armed'; st.innerHTML = `<span style="color:var(--armed)">Armat · încă o măsură, apoi ${esc(nxt ? nxt.name : 'FINAL')}</span>`; }
           else { els.now.className = 'p-now open-sec'; st.innerHTML = `<span style="color:var(--open)">↻ Deschisă · pedala A = ultima măsură</span>`; }
         } else {
           els.bcur.textContent = ev.bar + 1; els.btot.textContent = '/' + sec.bars;
@@ -287,8 +286,7 @@ export function PlayView(a, b, ctx) {
     if (state === 'playing') {
       if (now - bPressAt < 600) { stop(); toast('Oprit'); bPressAt = 0; return; }
       bPressAt = now;
-      if (player.disarm()) { lastShown.key = null; if (player.current) showBeat(player.current); updateControls(); toast('Armare anulată'); }
-      else toast('Apasă B încă o dată rapid pentru STOP');
+      toast('Apasă B încă o dată rapid pentru STOP');
       return;
     }
     if (idx > 0) { idx--; finishedAll = false; showReady(); }
