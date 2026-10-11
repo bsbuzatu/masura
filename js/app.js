@@ -3,6 +3,7 @@ import { Store, SECTION_TYPES, colorFor, baseName, uid, newSong, newSetlist, son
 import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 
+export const APP_VERSION = '1.4.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -413,8 +414,8 @@ function SettingsView() {
 
       <h2 class="sec-h">Pedală / tastatură Bluetooth</h2>
       <div class="card">
-        <div style="margin-bottom:10px"><b>Buton A</b> — Start piesă · „ultima măsură” în secțiunile deschise<br>${keysHtml('A')}</div>
-        <div style="margin-bottom:12px"><b>Buton B</b> — Piesa anterioară (oprit) · anulează armarea · <b>apăsat de 2 ori rapid = STOP</b><br>${keysHtml('B')}</div>
+        <div style="margin-bottom:10px"><b>Buton A</b> — Start piesă · în secțiunile deschise: măsura curentă devine ultima<br>${keysHtml('A')}</div>
+        <div style="margin-bottom:12px"><b>Buton B</b> — Piesa anterioară (când e oprit) · <b>apăsat de 2 ori rapid = STOP</b><br>${keysHtml('B')}</div>
         <div class="row">
           <button class="btn small ${learn === 'A' ? 'primary' : ''}" data-a="learnA">${learn === 'A' ? 'Apasă pedala A…' : 'Învață tasta A'}</button>
           <button class="btn small ${learn === 'B' ? 'primary' : ''}" data-a="learnB">${learn === 'B' ? 'Apasă pedala B…' : 'Învață tasta B'}</button>
@@ -436,7 +437,7 @@ function SettingsView() {
       </div>
 
       <h2 class="sec-h">Despre</h2>
-      <div class="card"><div class="hint" style="margin:0">Măsura v1.0 · funcționează complet offline după instalare.<br>
+      <div class="card"><div class="hint" style="margin:0">Măsura v${APP_VERSION} · funcționează complet offline după instalare.<br>
         iPhone: deschide în Safari → Share → „Add to Home Screen”. Folosește apoi mereu iconița de pe ecran (datele aplicației instalate sunt separate de cele din Safari).<br>
         Înainte de concert: Setări iPhone → Display &amp; Brightness → Auto-Lock → Never, și căștile pe fir.</div></div>
     </div>${tabs('settings')}</div>`;
@@ -523,13 +524,43 @@ const unlockOnce = () => { engine.unlock(); };
 window.addEventListener('pointerdown', unlockOnce, { once: true });
 window.addEventListener('keydown', unlockOnce, { once: true });
 
+// ---------- actualizări ----------
+// Versiunea nouă se descarcă în fundal. Se aplică automat (reîncărcare), dar NICIODATĂ
+// cât timp ești pe ecranul de scenă — atunci așteaptă până ieși din el.
+let pendingReload = false;
+function applyUpdateIfSafe() {
+  if (!pendingReload) return;
+  const onStage = location.hash.startsWith('#/scena');
+  if (!onStage) location.reload();
+}
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   let hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    const check = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(e => console.warn('SW', e));
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController) { hadController = true; return; }
-    // nu reîncărcăm niciodată singuri — mai ales nu pe scenă
-    if (!(current && current.playing)) toast('Versiune nouă a aplicației disponibilă', { label: 'Reîncarcă', fn: () => location.reload() });
+    pendingReload = true;
+    applyUpdateIfSafe(); // pe ecranul de scenă nu face nimic (nici mesaje) — se aplică la ieșire
   });
+  window.addEventListener('hashchange', applyUpdateIfSafe);
 }
+// iOS (aplicație instalată): uneori fereastra raportată e mai scurtă decât ecranul
+// și rămâne o bandă goală jos. Fixăm înălțimea la înălțimea reală a ecranului.
+function fixHeight() {
+  const standalone = navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+  let h = window.innerHeight;
+  if (standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    const portrait = window.matchMedia('(orientation: portrait)').matches;
+    const sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    h = Math.max(h, sh);
+  }
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+fixHeight();
+window.addEventListener('resize', fixHeight);
+window.addEventListener('orientationchange', () => setTimeout(fixHeight, 300));
+
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
