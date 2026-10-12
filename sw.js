@@ -1,6 +1,6 @@
 // Măsura — service worker: aplicația rulează complet offline după prima deschidere.
 // La fiecare versiune nouă, schimbă VERSION.
-const VERSION = 'masura-v1.6.1';
+const VERSION = 'masura-v1.6.1-i';
 const ASSETS = [
   './',
   './index.html',
@@ -16,7 +16,7 @@ const ASSETS = [
   './manifest.webmanifest',
 ];
 // iconițele se cachează dacă există, dar lipsa lor nu blochează instalarea offline
-const OPTIONAL = ['./icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
+const OPTIONAL = ['./icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
