@@ -2,7 +2,7 @@
 
 Aplicație web instalabilă (PWA), funcționează complet offline după prima deschidere.
 
-- Concerte (setlisturi) → piese → secțiuni în măsuri (fixe sau deschise)
+- Concerte (setlisturi) → piese (BPM, măsură, gamă) → secțiuni în măsuri (fixe sau deschise)
 - Count-in per piesă: pregătire + bețe
 - Click cu volum separat pentru timpul 1, timpii 2–4 și optimi
 - Pedală/tastatură Bluetooth: A = start / ultima măsură, B = înapoi / anulare, B×2 = stop
