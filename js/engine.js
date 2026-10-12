@@ -9,14 +9,41 @@ export class ClickEngine {
   constructor(vol) {
     this.vol = vol; // obiect partajat cu setările: {master, accent, beat, sub}
     this.ctx = null;
+    this.stalled = false;  // contextul zice „running”, dar ceasul audio stă pe loc
+    this._downAt = 0;      // de când nu mai avansează ceasul (0 = merge)
+    this._advAt = 0;       // ultima dată când l-am văzut avansând
+    this._lastT = -1;
+    this._alive = false;
+    this._ka = null;
+    setInterval(() => this._watch(), 300);
   }
 
-  get ready() { return !!this.ctx && this.ctx.state === 'running'; }
+  // „gata” = contextul rulează ȘI ceasul audio chiar avansează
+  get ready() { return !!this.ctx && this.ctx.state === 'running' && !this.stalled; }
+
+  // Pe iOS (mai ales cu DAC pe USB, după o pauză de liniște) contextul poate rămâne „running”
+  // cu ceasul înghețat, sau „interrupted”. Urmărim ceasul ca să știm asta ÎNAINTE de START.
+  _watch() {
+    const c = this.ctx, now = performance.now();
+    if (!c || c.state === 'closed') { this.stalled = false; this._downAt = 0; return; }
+    // în fundal nu numărăm: la revenire contextul are timp să pornească din nou
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') { this._downAt = 0; this._lastT = -1; return; }
+    const t = c.currentTime;
+    if (c.state === 'running' && t !== this._lastT) { this._advAt = now; this._downAt = 0; this.stalled = false; }
+    else {
+      if (!this._downAt) this._downAt = now;
+      if (c.state === 'running' && now - this._downAt > 700) this.stalled = true;
+    }
+    this._lastT = t;
+  }
+  // sunetul e pierdut de peste 2 s (ceas blocat sau context întrerupt)
+  get lost() { return !!this._downAt && performance.now() - this._downAt > 2000; }
 
   _create() {
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC({ latencyHint: 'interactive' });
     this.createdAt = performance.now();
+    this.stalled = false; this._downAt = 0; this._advAt = 0; this._lastT = -1;
     this.out = this.ctx.createGain();
     this.out.gain.value = curve(this.vol.master);
     // Limitator moale: clickul e amplificat de DRIVE ori și rotunjit sub nivelul maxim,
@@ -36,6 +63,23 @@ export class ClickEngine {
       ciStick: this._soft(392, 0.06, 0.18),
       ciStickAcc: this._soft(523, 0.07, 0.20),
     };
+    this._applyAlive();
+  }
+
+  // Ține ieșirea audio trează cât ești pe scenă / în metronom: un zgomot la −80 dB (inaudibil).
+  // Fără el, după o pauză de liniște telefonul sau DAC-ul pot adormi ieșirea, iar următorul START nu mai pornește.
+  keepAlive(on) { this._alive = !!on; this._applyAlive(); }
+  _applyAlive() {
+    if (this._ka) { try { this._ka.stop(); } catch (e) { /* ignore */ } try { this._ka.disconnect(); } catch (e) { /* ignore */ } this._ka = null; }
+    if (!this._alive || !this.ctx) return;
+    try {
+      const sr = this.ctx.sampleRate, buf = this.ctx.createBuffer(1, sr, sr), d = buf.getChannelData(0);
+      let seed = 777;
+      for (let i = 0; i < sr; i++) { seed = (seed * 16807) % 2147483647; d[i] = (seed / 1073741823.5 - 1) * 0.0001; }
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf; src.loop = true; src.connect(this.ctx.destination); src.start(0);
+      this._ka = src;
+    } catch (e) { /* ignore */ }
   }
 
   // Ton moale: sinus pur, atac lent (4 ms), fără armonici înalte
@@ -61,7 +105,8 @@ export class ClickEngine {
     // iOS 17+: ignoră comutatorul de silențios pentru sunetul aplicației
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
     if (!this.ctx || this.ctx.state === 'closed') this._create();
-    else if (this.ctx.state !== 'running' && performance.now() - this.createdAt > 1500) {
+    else if (this.stalled || (this.ctx.state !== 'running' && performance.now() - this.createdAt > 1500)) {
+      // ceas înghețat sau context care nu mai pornește: îl refacem, tot în gestul curent
       const old = this.ctx;
       this._create();
       try { old.close(); } catch (e) { /* ignore */ }
@@ -79,11 +124,26 @@ export class ClickEngine {
     if (this.ctx.state !== 'running') {
       const ctx = this.ctx;
       await new Promise(res => {
-        const t = setTimeout(res, 500);
+        const t = setTimeout(res, 600);
         ctx.addEventListener('statechange', function h() { if (ctx.state === 'running') { clearTimeout(t); ctx.removeEventListener('statechange', h); res(); } });
       });
     }
-    return this.ready;
+    return this._ticking();
+  }
+
+  // Confirmă că ceasul audio chiar avansează (nu doar că starea e „running”).
+  async _ticking() {
+    const c = this.ctx;
+    if (!c || c.state !== 'running') return false;
+    if (!this.stalled && performance.now() - this._advAt < 900) return true; // văzut mergând adineauri
+    const t = c.currentTime;
+    for (let i = 0; i < 8; i++) {
+      await new Promise(res => setTimeout(res, 25));
+      if (c !== this.ctx) return this.ready;
+      if (c.currentTime > t) { this.stalled = false; this._downAt = 0; this._advAt = performance.now(); return true; }
+    }
+    this.stalled = true;
+    return false;
   }
 
   // Pe ce canal iese clickul: 'both' (implicit), 'left' sau 'right'.
@@ -166,16 +226,28 @@ function driveCurve() {
 }
 
 // ---------- Timer în Worker (nu e frânat de randare) ----------
-function makeTicker(cb) {
+// Un singur Worker pentru toată aplicația, oricâte playere apar (scenă, probă de tempo, metronom).
+const tickSubs = new Set();
+let tickSrc = null;
+function tickAll() { tickSubs.forEach(f => { try { f(); } catch (e) { console.error(e); } }); }
+function tickSource() {
+  if (tickSrc) return tickSrc;
   try {
     const code = `let t=null;onmessage=e=>{if(e.data==='start'){clearInterval(t);t=setInterval(()=>postMessage(0),${LOOKAHEAD_MS});}else{clearInterval(t);t=null;}}`;
     const w = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
-    w.onmessage = cb;
-    return { start: () => w.postMessage('start'), stop: () => w.postMessage('stop') };
+    w.onmessage = tickAll;
+    tickSrc = { start: () => w.postMessage('start'), stop: () => w.postMessage('stop') };
   } catch (e) {
     let t = null;
-    return { start: () => { clearInterval(t); t = setInterval(cb, LOOKAHEAD_MS); }, stop: () => { clearInterval(t); t = null; } };
+    tickSrc = { start: () => { clearInterval(t); t = setInterval(tickAll, LOOKAHEAD_MS); }, stop: () => { clearInterval(t); t = null; } };
   }
+  return tickSrc;
+}
+export function makeTicker(cb) {
+  return {
+    start() { const was = tickSubs.size; tickSubs.add(cb); if (!was) tickSource().start(); },
+    stop() { if (tickSubs.delete(cb) && !tickSubs.size) tickSource().stop(); },
+  };
 }
 
 /*
@@ -230,6 +302,8 @@ export class Player {
   stop() {
     this.playing = false;
     this.ticker.stop();
+    // clickurile deja programate (până la ~0,1 s înainte) nu mai trebuie să se audă după STOP
+    for (const ev of this.queue) (ev.srcs || []).forEach(x => { try { x.stop(); } catch (e) { /* ignore */ } });
     this.queue = [];
     this.armed = null;
   }

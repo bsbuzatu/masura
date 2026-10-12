@@ -161,6 +161,44 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
 .toast[hidden] { display: none; }
 .toast button { background: var(--accent); color: #1a1205; border: 0; border-radius: 8px; padding: 6px 10px; font-weight: 700; }
 
+/* ---------- Metronom ---------- */
+.metro .m-grid { display: grid; gap: 12px; }
+.m-disp { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px 16px; text-align: center; }
+.m-disp .flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+.m-bpm { position: relative; display: block; width: 100%; padding: 0; border: 0; background: transparent; outline: none; text-align: center; font-family: var(--display); font-weight: 900; font-size: clamp(64px, 24vw, 132px); line-height: 1; letter-spacing: -0.03em; }
+.m-unit { position: relative; margin-top: 2px; color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: 0.06em; }
+.m-unit b { color: var(--accent); }
+.m-dots { position: relative; margin-top: 12px; }
+.m-ctl { display: grid; gap: 12px; }
+.m-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.m-steps button { height: 52px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.m-steps button:active { background: var(--line); }
+.m-row { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr); }
+.seg4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; height: 46px; padding: 4px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.seg4 button { min-width: 0; padding: 0 2px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg4 button.on { background: var(--accent); color: #1a1205; }
+.m-go { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.m-go button { height: clamp(76px, 15vh, 112px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface-2); font-family: var(--display); font-weight: 900; font-size: 26px; letter-spacing: 0.02em; user-select: none; -webkit-user-select: none; }
+.m-go small { font-family: var(--font); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted); }
+.m-go .m-tap.hit { background: #fff; color: #111; }
+.m-go .m-tap.hit small { color: #555; }
+.m-go .m-start { background: var(--accent); color: #1a1205; border-color: transparent; }
+.m-go .m-start.on { background: var(--armed); color: #fff; }
+@media (max-width: 420px) { .m-row { grid-template-columns: minmax(0, 1fr); } }
+/* telefon pe orizontală: afișajul în stânga, comenzile în dreapta */
+@media (orientation: landscape) and (max-height: 520px) {
+  .metro .page-head { margin: 0 0 8px; }
+  .metro .page-head h1 { font-size: 22px; }
+  .metro .m-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); grid-template-areas: "disp ctl" "disp go"; gap: 8px; }
+  .m-disp { grid-area: disp; display: flex; flex-direction: column; justify-content: center; }
+  .m-ctl { grid-area: ctl; gap: 6px; }
+  .m-go { grid-area: go; }
+  .m-bpm { font-size: clamp(56px, 30vh, 120px); }
+  .m-steps button { height: 42px; }
+  .m-go button { height: 62px; font-size: 22px; }
+  .metro .hint { display: none; }
+}
+
 /* ---------- Ecran de scenă ---------- */
 .play {
   position: fixed; inset: 0; display: grid; overflow: hidden; user-select: none; -webkit-user-select: none;
@@ -238,6 +276,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
 .p-ctl .stop.holding .fill { width: 100%; transition: width 0.8s linear; }
 .p-ctl .stop span { position: relative; }
 .p-ctl button:disabled { opacity: 0.3; }
+.p-ctl .stop.off { opacity: 0.3; }
 
 .p-ready { text-align: left; }
 .p-ready .big { font-family: var(--display); font-weight: 900; font-size: clamp(30px, 11vh, 72px); line-height: 1; letter-spacing: -0.02em; }
