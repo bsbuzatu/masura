@@ -21,7 +21,7 @@ export function PlayView(a, b, ctx) {
   let cells = [];   // cells[sec][bar] → element
   const CELL = 20;  // 18 + gap 2
   let lastShown = {};
-  let bPressAt = 0;
+  let bPressAt = 0, stoppedAt = 0;
 
   const handlers = { onBeat: ev => showBeat(ev), onEnd: () => songEnded() };
   const player = ctx.makePlayer ? ctx.makePlayer(handlers) : new Player(engine, handlers);
@@ -215,7 +215,9 @@ export function PlayView(a, b, ctx) {
     const g = els.go;
     els.prev.disabled = state === 'playing' || idx === 0;
     els.nextb.disabled = state === 'playing' || idx >= songs.length - 1;
-    els.stop.disabled = state !== 'playing';
+    // fără „disabled”: butonul se schimbă chiar sub deget (STOP ținut apăsat), iar pe iOS un buton
+    // dezactivat în timpul atingerii poate înghiți atingerea următoare
+    els.stop.classList.toggle('off', state !== 'playing');
     g.className = 'go';
     if (state !== 'playing') { g.textContent = 'START'; g.disabled = false; return; }
     const c = player.current;
@@ -292,6 +294,8 @@ export function PlayView(a, b, ctx) {
 
   let flashPeak = 1;
   function frame() {
+    // sunet pierdut în timpul piesei (ceas audio blocat / întrerupere): revenim la START, nu rămânem agățați
+    if (!monitor && state === 'playing' && engine.lost) { stop(); toast('Sunetul s-a întrerupt — apasă START'); }
     player.update();
     // pe monitor cardul nu pulsează: semnalul vine cu o mică întârziere și flash-ul ar bate pe lângă timp
     if (!monitor && player.lastBeatTime >= 0) {
@@ -319,6 +323,8 @@ export function PlayView(a, b, ctx) {
     starting = true;
     try {
       const audioOk = await engine.unlock();
+      // fără sunet nu pornim: altfel ecranul ar rămâne „în redare” cu ceasul oprit și START n-ar mai răspunde
+      if (!audioOk) { toast('Sunetul nu a pornit — apasă din nou START'); return; }
       finishedAll = false;
       player.load(song());
       const ok = await player.start();
@@ -329,7 +335,6 @@ export function PlayView(a, b, ctx) {
       keepAwake();
       updateControls();
       emit();
-      if (!audioOk) toast('Sunetul nu a pornit — oprește și apasă din nou START');
     } finally { starting = false; }
   }
   function stop() {
@@ -345,11 +350,13 @@ export function PlayView(a, b, ctx) {
   function actionB() {
     const now = performance.now();
     if (state === 'playing') {
-      if (now - bPressAt < 600) { stop(); toast('Oprit'); bPressAt = 0; return; }
+      if (now - bPressAt < 600) { stop(); toast('Oprit'); bPressAt = 0; stoppedAt = now; return; }
       bPressAt = now;
       toast('Apasă B încă o dată rapid pentru STOP');
       return;
     }
+    // o a treia apăsare imediat după STOP (pedală care „sare”) nu trebuie să schimbe piesa
+    if (starting || now - stoppedAt < 700) return;
     if (idx > 0) { idx--; finishedAll = false; showReady(); }
   }
 
@@ -442,7 +449,7 @@ export function PlayView(a, b, ctx) {
   }
 
   if (monitor) showWaiting('Mă conectez…');
-  else { showReady(); engine.unlock(); }
+  else { showReady(); engine.unlock(); if (engine.keepAlive) engine.keepAlive(true); }
   keepAwake();
 
   return {
@@ -451,6 +458,7 @@ export function PlayView(a, b, ctx) {
     destroy() {
       if (broadcast) broadcast.send({ type: 'idle', setlist: title });
       player.stop();
+      if (!monitor && engine.keepAlive) engine.keepAlive(false);
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
