@@ -259,6 +259,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
 .share-st { font-weight: 700; font-size: 14px; }
 .share-st.on { color: var(--ok); } .share-st.off { color: var(--danger); }
 
+/* avertizare: ecranul se poate stinge (doar pe monitor) */
+.wake-warn { position: absolute; left: 50%; bottom: calc(var(--sab) + 14px); transform: translateX(-50%); z-index: 40;
+  background: var(--accent); color: #1a1205; font-weight: 800; font-size: 14px; padding: 10px 14px; border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5); white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; }
+.wake-warn[hidden] { display: none; }
+
 /* monitor: fără comenzi */
 .play.monitor .p-ctl, .play.monitor .x { display: none; }
 .play.monitor { grid-template-rows: auto minmax(0, 1fr) auto; }
