@@ -4,8 +4,9 @@ import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
 import * as trupa from './trupa.js';
+import { MetroView, makeTapper, tapTime } from './metro.js';
 
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.9.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -62,7 +63,7 @@ function trupaSchedule(ms = 4000) {
   if (!S.trupa.enabled) return;
   clearTimeout(trupaTimer);
   trupaTimer = setTimeout(() => {
-    if (location.hash.startsWith('#/scena') || navigator.onLine === false) return;
+    if (location.hash.startsWith('#/scena') || (current && current.busy) || navigator.onLine === false) return;
     trupaRun({ auto: true });
   }, ms);
 }
@@ -99,11 +100,12 @@ const ICON = {
   setlist: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7"/><path d="M18 15v-9l3 1.5"/><circle cx="16.5" cy="17" r="2.5"/></svg>',
   songs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="4" height="14" rx="1"/><rect x="9" y="5" width="6" height="14" rx="1"/><rect x="17" y="5" width="4" height="14" rx="1"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+  metro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5L9 3z"/><path d="M12 16l5-10"/><path d="M7 16h10"/></svg>',
 };
 
 function tabs(on) {
   const t = (h, k, label) => `<a href="#${h}" class="${on === k ? 'on' : ''}">${ICON[k]}${label}</a>`;
-  return `<nav class="tabs">${t('/concerte', 'setlist', 'Concerte')}${t('/piese', 'songs', 'Piese')}${t('/setari', 'settings', 'Setări')}</nav>`;
+  return `<nav class="tabs">${t('/concerte', 'setlist', 'Concerte')}${t('/piese', 'songs', 'Piese')}${t('/metronom', 'metro', 'Metronom')}${t('/setari', 'settings', 'Setări')}</nav>`;
 }
 
 function structChips(song) {
@@ -127,6 +129,7 @@ function route() {
   else if (a === 'piesa') current = SongEditView(b);
   else if (a === 'concert') current = SetlistEditView(b);
   else if (a === 'scena') { current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B, broadcast: broadcaster }); setLinkDot(); }
+  else if (a === 'metronom') current = MetroView({ app, store, S, engine, $, toast, tabs, DEFAULT_KEYS_A, DEFAULT_KEYS_B });
   else if (a === 'setari') current = SettingsView();
   else if (a === 'trupa') current = TrupaLinkView();
   else current = SetlistsView();
@@ -210,7 +213,7 @@ function SongEditView(id) {
   const save = debounce(() => { if (!deleted) store.upsertSong(structuredClone(song)); }, 300);
   const saveNow = () => { if (!deleted) store.upsertSong(structuredClone(song)); };
   let preview = null;
-  let taps = [];
+  const tapper = makeTapper();
 
   const secRow = (s, i) => `
     <div class="sec-row" data-i="${i}">
@@ -304,6 +307,16 @@ function SongEditView(id) {
   $('#prep').onchange = e => setNum('countPrep', parseInt(e.target.value) || 0, 0, 16, e.target);
   $('#sticks').onchange = e => setNum('countSticks', parseInt(e.target.value) || 0, 0, 16, e.target);
 
+  // Tap tempo: reacționează chiar la atingere (pointerdown), cu timpul măsurat înainte de orice altceva
+  const tapBtn = $('[data-a="tap"]');
+  const doTap = t => {
+    const r = tapper(t);
+    if (!engine.ready) engine.unlock();
+    if (r.bpm) setNum('bpm', Math.round(r.bpm), 20, 400, $('#bpm'));
+    tapBtn.textContent = r.bpm ? `Tap (${r.n}) → ${song.bpm}` : 'Tap…';
+  };
+  tapBtn.addEventListener('pointerdown', e => { e.preventDefault(); doTap(tapTime(e)); });
+
   // editări în rândurile de secțiuni (fără re-randare, ca să nu pierzi focusul)
   $('#secs').addEventListener('input', e => {
     const row = e.target.closest('.sec-row'); if (!row) return;
@@ -349,17 +362,7 @@ function SongEditView(id) {
       case 'back': go('/piese'); break;
       case 'test': saveNow(); engine.unlock(); go('/scena/piesa/' + song.id); break;
       case 'preview': await engine.unlock(); if (preview) stopPreview(); else startPreview(); break;
-      case 'tap': {
-        await engine.unlock();
-        const now = performance.now();
-        taps = taps.filter(t => now - t < 2500); taps.push(now);
-        if (taps.length >= 2) {
-          const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
-          setNum('bpm', Math.round(60000 / iv), 20, 400, $('#bpm'));
-        }
-        el.textContent = taps.length >= 2 ? `Tap (${taps.length}) → ${song.bpm}` : 'Tap…';
-        break;
-      }
+      case 'tap': if (e.detail === 0) doTap(performance.now()); break; // doar de la tastatură; atingerea e tratată la pointerdown
       case 'bars-': case 'bars+': {
         const s = song.sections[i]; s.bars = clamp(s.bars + (a === 'bars+' ? 1 : -1), 1, 999);
         row.querySelector('[data-f=bars]').value = s.bars; save(); $('#sum').innerHTML = summary(); break;
@@ -763,11 +766,11 @@ window.addEventListener('keydown', unlockOnce, { once: true });
 
 // ---------- actualizări ----------
 // Versiunea nouă se descarcă în fundal. Se aplică automat (reîncărcare), dar NICIODATĂ
-// cât timp ești pe ecranul de scenă — atunci așteaptă până ieși din el.
+// cât timp ești pe ecranul de scenă sau merge metronomul — atunci așteaptă până ieși de acolo.
 let pendingReload = false;
 function applyUpdateIfSafe() {
   if (!pendingReload) return;
-  const onStage = location.hash.startsWith('#/scena');
+  const onStage = location.hash.startsWith('#/scena') || !!(current && current.busy); // nici cu metronomul pornit
   if (!onStage) location.reload();
 }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
