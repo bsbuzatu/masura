@@ -1,5 +1,5 @@
 // Măsura → Trupa: sincronizare într-un singur sens.
-// Măsura e sursa de adevăr pentru titlu, BPM, măsură și structură (cu nr. de măsuri).
+// Măsura e sursa de adevăr pentru titlu, BPM, măsură, gamă și structură (cu nr. de măsuri).
 // Atinge DOAR colecția „songs” din Firestore și DOAR câmpurile de mai jos (OWNED).
 // Nu citește, nu scrie și nu șterge niciodată „events” sau „availability” (calendarele Trupei).
 // Nu șterge niciodată nimic în Trupa.
@@ -42,6 +42,7 @@ export function payload(song) {
     structure: secs.map(s => partLabel(s.name)),
     structureBars: secs.map(s => (s.open ? null : Math.max(0, Math.round(s.bars || 0)))),
     timeSig: `${song.num || 4}/${song.den || 4}`,
+    key: String(song.key || '').trim(),
     masuraId: song.id,
     masuraUpdatedAt: song.updatedAt || 0,
     masuraSyncedAt: Date.now(),
@@ -174,7 +175,7 @@ export async function applyChoices(T, songs, choice) {
         catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
         continue;
       }
-      try { T.links[s.id] = await create(payload(s)); T.synced[s.id] = s.updatedAt; res.created++; }
+      try { T.links[s.id] = await create(payload(s)); T.synced[s.id] = s.updatedAt; res.updated++; }
       catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
     } else {
       T.links[s.id] = c;

@@ -3,6 +3,7 @@
 
 const LOOKAHEAD_MS = 25;     // cât de des rulează programatorul
 const SCHEDULE_AHEAD = 0.12; // cât de departe în viitor programăm (secunde)
+const DRIVE = 3;             // cât de tare împingem clickul în limitator (1 = fără amplificare)
 
 export class ClickEngine {
   constructor(vol) {
@@ -18,11 +19,18 @@ export class ClickEngine {
     this.createdAt = performance.now();
     this.out = this.ctx.createGain();
     this.out.gain.value = curve(this.vol.master);
-    this.out.connect(this.ctx.destination);
+    // Limitator moale: clickul e amplificat de DRIVE ori și rotunjit sub nivelul maxim,
+    // așa că se aude mult mai tare fără să distorsioneze urât (un click scurt are puțină energie).
+    this.shaper = this.ctx.createWaveShaper();
+    this.shaper.curve = driveCurve();
+    this.shaper.oversample = '4x';
+    this.out.connect(this.shaper);
+    this.merger = null;
+    this._route();
     this.buffers = {
-      accent: this._tone(1760, 0.030, 0.10, 0.35),
-      beat: this._tone(1320, 0.024, 0.08, 0.28),
-      sub: this._tone(990, 0.016, 0.06, 0.20),
+      accent: this._tone(1760, 0.038, 0.12, 0.35),
+      beat: this._tone(1320, 0.030, 0.10, 0.28),
+      sub: this._tone(990, 0.018, 0.06, 0.20),
       // count-in: tonuri moi, joase, fără transient — nu taie prin mix
       ciPrep: this._soft(494, 0.06, 0.18),
       ciStick: this._soft(392, 0.06, 0.18),
@@ -78,6 +86,25 @@ export class ClickEngine {
     return this.ready;
   }
 
+  // Pe ce canal iese clickul: 'both' (implicit), 'left' sau 'right'.
+  // Un singur canal ajută când intri cu un cablu stereo într-o intrare balansată
+  // (acolo semnalul identic pe stânga și dreapta se anulează).
+  _route() {
+    if (!this.ctx) return;
+    try { this.shaper.disconnect(); } catch (e) { /* ignore */ }
+    if (this.merger) { try { this.merger.disconnect(); } catch (e) { /* ignore */ } this.merger = null; }
+    const ch = this.vol.ch;
+    if (ch === 'left' || ch === 'right') {
+      this.merger = this.ctx.createChannelMerger(2);
+      this.shaper.connect(this.merger, 0, ch === 'left' ? 0 : 1);
+      this.merger.connect(this.ctx.destination);
+    } else this.shaper.connect(this.ctx.destination);
+  }
+  setChannel(ch) {
+    this.vol.ch = ch === 'left' || ch === 'right' ? ch : 'both';
+    this._route();
+  }
+
   setMaster(v) {
     this.vol.master = v;
     if (this.out) this.out.gain.setTargetAtTime(curve(v), this.ctx.currentTime, 0.02);
@@ -97,8 +124,12 @@ export class ClickEngine {
       const env = att * Math.exp(-t / decay);
       const tone = Math.sin(2 * Math.PI * freq * t) * 0.82 + Math.sin(2 * Math.PI * freq * 2 * t) * 0.18;
       const click = rnd() * Math.exp(-t / 0.0012) * transient;
-      d[i] = (tone * env + click * att) * 0.75;
+      d[i] = tone * env + click * att;
     }
+    // normalizăm la vârf: fiecare click pleacă de la nivelul maxim, volumele îl coboară de acolo
+    let peak = 0;
+    for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= 0.98 / peak;
     // fade-out final ca să nu pocnească
     const f = Math.min(n, Math.floor(sr * 0.005));
     for (let i = 0; i < f; i++) d[n - 1 - i] *= i / f;
@@ -126,6 +157,13 @@ export class ClickEngine {
 }
 
 function curve(v) { v = Math.max(0, Math.min(1, v)); return v * v; }
+
+// tanh(DRIVE·x), scalat sub 0 dBFS (cu rezervă pentru filtrul de supraeșantionare)
+function driveCurve() {
+  const n = 2049, c = new Float32Array(n), top = Math.tanh(DRIVE);
+  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(DRIVE * x) / top * 0.92; }
+  return c;
+}
 
 // ---------- Timer în Worker (nu e frânat de randare) ----------
 function makeTicker(cb) {

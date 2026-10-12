@@ -27,7 +27,7 @@ export function colorFor(name) {
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 export const DEFAULT_SETTINGS = {
-  vol: { master: 0.85, accent: 0.9, beat: 0.6, sub: 0 },
+  vol: { master: 0.85, accent: 0.9, beat: 0.6, sub: 0, ch: 'both' }, // ch: 'both' | 'left' | 'right'
   flash: 0.7,
   keysA: [], // taste învățate în plus față de cele implicite
   keysB: [],
@@ -41,6 +41,7 @@ export function newSong(partial = {}) {
     bpm: 120,
     num: 4,
     den: 4,
+    key: '', // gama piesei, text liber (ex. „Em”, „La minor”, „capo 2”)
     countPrep: 2,
     countSticks: 4,
     notes: '',
@@ -101,6 +102,7 @@ function normalizeSong(s) {
   out.bpm = clamp(Number(out.bpm) || 120, 20, 400);
   out.num = clamp(parseInt(out.num) || 4, 1, 16);
   out.den = [2, 4, 8, 16].includes(Number(out.den)) ? Number(out.den) : 4;
+  out.key = String(out.key ?? '').slice(0, 40);
   out.countPrep = clamp(parseInt(out.countPrep) || 0, 0, 16);
   out.countSticks = clamp(parseInt(out.countSticks ?? 4) || 0, 0, 16);
   out.sections = (Array.isArray(s.sections) ? s.sections : []).map(x => ({
