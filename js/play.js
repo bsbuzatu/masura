@@ -35,6 +35,7 @@ export function PlayView(a, b, ctx) {
       <button class="x" data-a="vol" aria-label="Volum">🔊</button>
       <div class="link-dot" id="linkdot" hidden></div>
     </header>
+    <div class="wake-warn" id="wakewarn" hidden>Atinge ecranul o dată ca să rămână aprins</div>
     <main class="p-main">
       <section class="p-now" id="now"><div class="flash" id="flash"></div><div class="bar-c" id="barc"></div><div id="nowc"></div></section>
       <aside class="p-side">
@@ -58,13 +59,32 @@ export function PlayView(a, b, ctx) {
   };
 
   // ---- wake lock: ecranul rămâne aprins cât ești pe ecranul de scenă ----
-  let wake = null;
+  // Unele telefoane retrag blocarea (economisire baterie etc.) sau o acordă doar după o atingere:
+  // o cerem din nou la eliberare, la fiecare atingere și periodic. Pe monitor arătăm dacă nu e activă.
+  let wake = null, wakeOk = false, destroyed = false;
+  const setWake = ok => {
+    wakeOk = ok;
+    const w = document.getElementById('wakewarn');
+    if (w) w.hidden = ok || !monitor;
+  };
   const keepAwake = async () => {
-    try { if ('wakeLock' in navigator && document.visibilityState === 'visible') { wake = await navigator.wakeLock.request('screen'); } } catch (e) { /* ignore */ }
+    if (destroyed || document.visibilityState !== 'visible') return;
+    if (!('wakeLock' in navigator)) { setWake(false); return; }
+    if (wake && !wake.released) { setWake(true); return; }
+    try {
+      wake = await navigator.wakeLock.request('screen');
+      setWake(true);
+      wake.addEventListener('release', () => {
+        setWake(false);
+        if (!destroyed && document.visibilityState === 'visible') setTimeout(keepAwake, 1000);
+      });
+    } catch (e) { setWake(false); }
   };
   const onVis = () => { if (document.visibilityState === 'visible') { keepAwake(); if (engine.ctx) engine.ctx.resume().catch(() => {}); } };
   document.addEventListener('visibilitychange', onVis);
-  keepAwake();
+  const onTouch = () => { if (!wakeOk) keepAwake(); };
+  window.addEventListener('pointerdown', onTouch, true);
+  const wakeTimer = setInterval(keepAwake, 20000);
 
   const song = () => songs[idx];
 
@@ -419,6 +439,7 @@ export function PlayView(a, b, ctx) {
 
   if (monitor) showWaiting('Mă conectez…');
   else { showReady(); engine.unlock(); }
+  keepAwake();
 
   return {
     apply,
@@ -430,6 +451,9 @@ export function PlayView(a, b, ctx) {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVis);
+      destroyed = true;
+      clearInterval(wakeTimer);
+      window.removeEventListener('pointerdown', onTouch, true);
       try { wake && wake.release(); } catch (e) { /* ignore */ }
     },
     get playing() { return state === 'playing'; },
