@@ -149,7 +149,8 @@ export function PlayView(a, b, ctx) {
     const s = song();
     $('#where').textContent = songs.length > 1 ? `${idx + 1}/${songs.length}` : title;
     $('#ttl').textContent = s.title;
-    $('#meta').innerHTML = `${s.bpm} BPM<small>${s.num}/${s.den}</small>`;
+    const key = String(s.key || '').trim();
+    $('#meta').innerHTML = `${key ? `<span class="key">${esc(key)}</span>` : ''}${s.bpm} BPM<small>${s.num}/${s.den}</small>`;
   }
 
   function setNext(label, name, bars, hot) {
@@ -182,9 +183,11 @@ export function PlayView(a, b, ctx) {
     els.now.className = 'p-now';
     els.barc.style.background = 'transparent';
     const st = songStats(s);
+    const key = String(s.key || '').trim();
     els.nowc.innerHTML = `<div class="p-ready">
       ${finishedAll ? `<div class="sub" style="color:var(--ok);margin:0 0 8px">✓ Final de concert</div>` : ''}
       <div class="big">${esc(s.title)}</div>
+      ${key ? `<div class="keyline"><span>GAMĂ</span>${esc(key)}</div>` : ''}
       <div class="sub num">${s.bpm} BPM · ${s.num}/${s.den} · ${s.sections.length} secțiuni · ${fmtDuration(st.secs)}${st.openCount ? ' + deschis' : ''} · count-in ${s.countPrep}+${s.countSticks}</div>
       ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
     </div>`;
@@ -203,7 +206,7 @@ export function PlayView(a, b, ctx) {
     const s = song();
     broadcast.send({
       type: 'state', setlist: title, idx, total: songs.length, finishedAll,
-      song: s && { title: s.title, bpm: s.bpm, num: s.num, den: s.den, countPrep: s.countPrep, countSticks: s.countSticks, notes: s.notes, sections: s.sections },
+      song: s && { title: s.title, bpm: s.bpm, num: s.num, den: s.den, key: s.key || '', countPrep: s.countPrep, countSticks: s.countSticks, notes: s.notes, sections: s.sections },
       state, t0: state === 'playing' ? t0 : 0, armed: state === 'playing' ? player.armed : null,
     });
   }
@@ -290,7 +293,8 @@ export function PlayView(a, b, ctx) {
   let flashPeak = 1;
   function frame() {
     player.update();
-    if (player.lastBeatTime >= 0) {
+    // pe monitor cardul nu pulsează: semnalul vine cu o mică întârziere și flash-ul ar bate pe lângă timp
+    if (!monitor && player.lastBeatTime >= 0) {
       const dt = engine.audibleNow() - player.lastBeatTime;
       const o = Math.max(0, 1 - dt / 0.16) * flashPeak * S.flash * 0.75;
       els.flash.style.opacity = o.toFixed(3);
