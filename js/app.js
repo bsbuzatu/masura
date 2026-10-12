@@ -4,7 +4,7 @@ import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
 
-export const APP_VERSION = '1.6.1';
+export const APP_VERSION = '1.6.2';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -164,8 +164,10 @@ function SongEditView(id) {
   const orig = store.song(id);
   if (!orig) { go('/piese'); return {}; }
   const song = structuredClone(orig);
-  const save = debounce(() => { store.upsertSong(structuredClone(song)); }, 300);
-  const saveNow = () => store.upsertSong(structuredClone(song));
+  // după ștergere nu mai salvăm nimic (altfel salvarea automată ar readuce piesa)
+  let deleted = false;
+  const save = debounce(() => { if (!deleted) store.upsertSong(structuredClone(song)); }, 300);
+  const saveNow = () => { if (!deleted) store.upsertSong(structuredClone(song)); };
   let preview = null;
   let taps = [];
 
@@ -338,7 +340,7 @@ function SongEditView(id) {
       case 'dup-song': { saveNow(); const c = { ...structuredClone(song), id: uid(), title: song.title + ' (copie)' }; c.sections.forEach(s => s.id = uid()); store.upsertSong(c); go('/piesa/' + c.id); break; }
       case 'del-song': {
         const used = store.data.setlists.filter(sl => sl.songIds.includes(song.id)).length;
-        if (confirm(`Ștergi „${song.title}”?${used ? `\nApare în ${used} concert(e) și va fi scoasă din ele.` : ''}`)) { store.deleteSong(song.id); go('/piese'); }
+        if (confirm(`Ștergi „${song.title}”?${used ? `\nApare în ${used} concert(e) și va fi scoasă din ele.` : ''}`)) { deleted = true; store.deleteSong(song.id); go('/piese'); }
         break;
       }
     }
