@@ -3,8 +3,9 @@ import { Store, SECTION_TYPES, colorFor, baseName, uid, newSong, newSetlist, son
 import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
+import * as trupa from './trupa.js';
 
-export const APP_VERSION = '1.6.2';
+export const APP_VERSION = '1.7.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -36,6 +37,44 @@ function updateShare() {
   setLinkDot();
 }
 const monitorUrl = code => new URL('monitor.html#' + code, location.href.split('#')[0]).href;
+
+// ---------- Trupa: Măsura trimite piesele (titlu, BPM, structură cu măsuri) ----------
+S.trupa = { ...structuredClone(trupa.DEFAULT_TRUPA), ...(S.trupa || {}) };
+let trupaBusy = false, trupaPending = [], trupaTimer = null;
+async function trupaRun(opts = {}) {
+  if (trupaBusy) return null;
+  trupaBusy = true; refreshTrupaCard();
+  try {
+    const r = await trupa.sync(S.trupa, store.data.songs, opts);
+    trupaPending = r.pending;
+    S.trupa.lastError = r.errors.join(' · ');
+    if (!r.errors.length) S.trupa.lastSync = Date.now();
+    return r;
+  } catch (e) {
+    S.trupa.lastError = e.message || String(e);
+    return null;
+  } finally {
+    store.save(); trupaBusy = false; refreshTrupaCard();
+  }
+}
+// sincronizare automată: niciodată pe ecranul de scenă, doar cu internet
+function trupaSchedule(ms = 4000) {
+  if (!S.trupa.enabled) return;
+  clearTimeout(trupaTimer);
+  trupaTimer = setTimeout(() => {
+    if (location.hash.startsWith('#/scena') || navigator.onLine === false) return;
+    trupaRun({ auto: true });
+  }, ms);
+}
+function refreshTrupaCard() { if (current && current.onTrupa) current.onTrupa(); }
+{ // orice salvare/ștergere de piesă programează o sincronizare
+  const up = store.upsertSong.bind(store), del = store.deleteSong.bind(store);
+  store.upsertSong = s => { up(s); trupaSchedule(); };
+  store.deleteSong = id => { del(id); trupaSchedule(); };
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') trupaSchedule(2000); });
+window.addEventListener('online', () => trupaSchedule(2000));
+window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/scena')) trupaSchedule(3000); });
 
 const DEFAULT_KEYS_A = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
 const DEFAULT_KEYS_B = ['ArrowLeft', 'ArrowUp', 'PageUp'];
@@ -88,6 +127,7 @@ function route() {
   else if (a === 'concert') current = SetlistEditView(b);
   else if (a === 'scena') { current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B, broadcast: broadcaster }); setLinkDot(); }
   else if (a === 'setari') current = SettingsView();
+  else if (a === 'trupa') current = TrupaLinkView();
   else current = SetlistsView();
 }
 window.addEventListener('hashchange', route);
@@ -444,6 +484,26 @@ function SettingsView() {
       </div>
       <div class="hint">Trimite linkul pe grupul trupei. Colegii îl deschid în browser și văd ecranul tău de scenă. Aplicația transmite doar când ai internet (date mobile sau Wi-Fi) — în airplane mode nu. Ca să nu sune telefonul, folosește Do Not Disturb / Focus.</div>`;
   };
+  const trupaHtml = () => {
+    const T = S.trupa;
+    if (!T.enabled) return `<div class="hint" style="margin:0 0 12px">Trimite piesele tale în aplicația Trupa: titlu, BPM, măsură și structura cu numărul de măsuri pe fiecare parte. Măsura rămâne sursa: ce schimbi aici se actualizează în Trupa, nu invers. Calendarele Trupei nu sunt atinse.</div>
+      <button class="btn primary" data-a="trupa-link">Leagă piesele de Trupa</button>`;
+    const n = Object.keys(T.links).length;
+    const when = T.lastSync ? new Date(T.lastSync).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+    return `<div class="row" style="align-items:center;margin-bottom:10px">
+        <div><b>${n}</b> ${n === 1 ? 'piesă legată' : 'piese legate'}<div class="muted" style="font-size:13px">ultima trimitere: ${esc(when)}</div></div>
+        <div class="spacer"></div>
+        <div class="share-st ${trupaBusy ? 'on' : T.lastError ? 'off' : 'on'}">${trupaBusy ? '● trimit…' : T.lastError ? '● eroare' : '● la zi'}</div>
+      </div>
+      ${trupaPending.length ? `<div class="hint" style="color:var(--accent);margin:0 0 10px">${trupaPending.length} ${trupaPending.length === 1 ? 'piesă nouă seamănă' : 'piese noi seamănă'} cu piese din Trupa — confirmă în „Verifică legăturile”.</div>` : ''}
+      ${T.lastError ? `<div class="hint" style="color:var(--danger);margin:0 0 10px">${esc(T.lastError)}</div>` : ''}
+      <div class="row">
+        <button class="btn primary" data-a="trupa-sync" ${trupaBusy ? 'disabled' : ''}>Trimite acum</button>
+        <button class="btn" data-a="trupa-link">Verifică legăturile</button>
+        <button class="btn danger" data-a="trupa-off">Oprește</button>
+      </div>
+      <div class="hint">Se trimite automat când ai internet, după ce modifici o piesă (niciodată în timpul unui concert). În Trupa se schimbă doar titlul, BPM-ul, măsura și structura; voturile, linkurile, versurile și calendarele rămân neatinse. Piesele șterse aici nu se șterg din Trupa.</div>`;
+  };
   const render = () => {
     app.innerHTML = `<div class="shell"><div class="page">
       <div class="page-head"><h1>Setări</h1></div>
@@ -473,6 +533,9 @@ function SettingsView() {
 
       <h2 class="sec-h">Monitor pentru colegi</h2>
       <div class="card" id="sharecard">${shareHtml()}</div>
+
+      <h2 class="sec-h">Trupa</h2>
+      <div class="card" id="trupacard">${trupaHtml()}</div>
 
       <h2 class="sec-h">Date</h2>
       <div class="card">
@@ -517,6 +580,13 @@ function SettingsView() {
     if (a === 'learnA' || a === 'learnB') { learn = a.slice(-1); stopTester(); render(); }
     if (a === 'resetkeys') { S.keysA = []; S.keysB = []; store.save(); render(); toast('Tastele au revenit la implicit'); }
     if (a === 'export') exportData();
+    if (a === 'trupa-link') go('/trupa');
+    if (a === 'trupa-off') { if (confirm('Oprești trimiterea automată către Trupa? Piesele deja trimise rămân în Trupa.')) { S.trupa.enabled = false; store.save(); render(); } }
+    if (a === 'trupa-sync') {
+      const r = await trupaRun({ auto: true, force: true });
+      if (r) toast(`Trupa: ${r.updated} actualizate${r.created ? `, ${r.created} adăugate` : ''}${r.errors.length ? `, ${r.errors.length} erori` : ''}`);
+      else toast('Nu am putut trimite: ' + S.trupa.lastError);
+    }
     if (a === 'share-on') { if (!S.share.code) S.share.code = newCode(); S.share.enabled = true; store.save(); updateShare(); render(); }
     if (a === 'share-off') { S.share.enabled = false; store.save(); updateShare(); render(); }
     if (a === 'share-new') { if (confirm('Generezi un cod nou? Colegii vor avea nevoie de linkul nou.')) { S.share.code = newCode(); store.save(); updateShare(); render(); } }
@@ -535,6 +605,8 @@ function SettingsView() {
           const mode = a === 'import-replace' ? 'replace' : 'merge';
           if (mode === 'replace' && !confirm('Înlocuiești TOATE piesele și concertele de pe acest dispozitiv cu cele din fișier?')) return;
           const r = store.importJSON(text, mode);
+          S.trupa = { ...structuredClone(trupa.DEFAULT_TRUPA), ...(S.trupa || {}) };
+          trupaSchedule();
           toast(`Import reușit: ${r.songs.added} piese noi, ${r.songs.updated} actualizate · ${r.setlists.added} concerte noi`);
           render();
         } catch (err) { alert('Import eșuat: ' + err.message); }
@@ -560,7 +632,100 @@ function SettingsView() {
   return {
     destroy() { stopTester(); window.removeEventListener('keydown', onKey); app.oninput = null; },
     onShareStatus() { const c = document.getElementById('sharecard'); if (c) c.innerHTML = shareHtml(); },
+    onTrupa() { const c = document.getElementById('trupacard'); if (c) c.innerHTML = trupaHtml(); },
   };
+}
+
+// ================= LEGARE CU TRUPA =================
+// Pentru fiecare piesă din Măsura alegi: piesa corespunzătoare din Trupa (se actualizează,
+// inclusiv titlul), „piesă nouă în Trupa” sau „nu trimite”.
+function TrupaLinkView() {
+  let remote = null, err = '', busy = false, choice = {};
+  const T = S.trupa;
+  const songs = [...store.data.songs].sort((a, b) => a.title.localeCompare(b.title, 'ro'));
+  const head = `<div class="page-head"><button class="back" data-a="back">‹ Setări</button><h1>Trupa</h1></div>`;
+  const render = () => {
+    if (!remote) {
+      app.innerHTML = `<div class="shell"><div class="page">${head}
+        <div class="card">${err ? `<div style="color:var(--danger);margin-bottom:12px">${esc(err)}</div><button class="btn primary" data-a="retry">Încearcă din nou</button>` : '<div class="muted">Mă conectez la Trupa… (e nevoie de internet)</div>'}</div>
+      </div></div>`;
+      return;
+    }
+    const used = new Set(Object.values(choice).filter(v => v !== 'new' && v !== 'skip'));
+    const rows = songs.map(s => {
+      const c = choice[s.id];
+      const ranked = [...remote].sort((x, y) => trupa.similarity(y.title, s.title) - trupa.similarity(x.title, s.title) || x.title.localeCompare(y.title, 'ro'));
+      const opts = ranked.map(r => `<option value="${esc(r.id)}" ${c === r.id ? 'selected' : ''} ${used.has(r.id) && c !== r.id ? 'disabled' : ''}>↻ ${esc(r.title)}${r.artist ? ' — ' + esc(r.artist) : ''}${r.archived ? ' (arhivată)' : ''}</option>`).join('');
+      const p = trupa.payload(s);
+      const linked = c && c !== 'new' && c !== 'skip' ? remote.find(r => r.id === c) : null;
+      const rename = linked && linked.title !== p.title;
+      return `<div class="card" style="padding:12px 14px">
+        <div style="font-weight:700">${esc(s.title)}</div>
+        <div class="muted" style="font-size:13px;margin:2px 0 8px">${esc(p.bpm ?? '')} BPM · ${esc(p.timeSig)} · ${esc(p.structure.map((x, i) => x + ' ' + (p.structureBars[i] ?? '∞')).join(' · '))}</div>
+        <select class="input" data-pick="${esc(s.id)}">
+          <option value="new" ${c === 'new' ? 'selected' : ''}>＋ Piesă nouă în Trupa</option>
+          <option value="skip" ${c === 'skip' ? 'selected' : ''}>— Nu trimite în Trupa</option>
+          <optgroup label="Actualizează piesa din Trupa:">${opts}</optgroup>
+        </select>
+        ${rename ? `<div class="hint">Titlul din Trupa „${esc(linked.title)}” devine „${esc(p.title)}”.</div>` : ''}
+      </div>`;
+    }).join('');
+    app.innerHTML = `<div class="shell"><div class="page">${head}
+      <div class="hint" style="margin:0 0 14px">Pentru fiecare piesă alege perechea ei din Trupa. Piesa din Trupa primește titlul, BPM-ul, măsura și structura de aici; voturile, linkul, versurile și arhiva rămân cum sunt. Calendarele nu sunt atinse.</div>
+      ${songs.length ? rows : '<div class="empty">Nu ai piese în Măsura.</div>'}
+      <div class="row" style="margin:16px 0 30px"><button class="btn primary" data-a="apply" ${busy ? 'disabled' : ''}>${busy ? 'Trimit…' : 'Trimite în Trupa'}</button><button class="btn ghost" data-a="back">Renunță</button></div>
+    </div></div>`;
+  };
+  const load = async () => {
+    err = ''; remote = null; render();
+    try {
+      remote = await trupa.fetchTrupaSongs();
+      const ids = new Set(songs.map(s => s.id));
+      const taken = new Set();
+      // 1) legături existente / marcaj din Trupa
+      for (const s of songs) {
+        let tid = T.links[s.id];
+        if (!tid || !remote.some(r => r.id === tid)) { const r = remote.find(r => r.masuraId === s.id); tid = r ? r.id : ''; }
+        if (T.skip.includes(s.id)) choice[s.id] = 'skip';
+        else if (tid && !taken.has(tid)) { choice[s.id] = tid; taken.add(tid); }
+      }
+      // 2) restul: cea mai bună potrivire de titlu printre piesele încă libere
+      for (const s of songs) {
+        if (choice[s.id]) continue;
+        const free = remote.filter(r => !taken.has(r.id) && !(r.masuraId && ids.has(r.masuraId) && r.masuraId !== s.id));
+        let best = null, bs = 0;
+        for (const r of free) { const v = trupa.similarity(r.title, s.title); if (v > bs) { bs = v; best = r; } }
+        if (best && bs >= 0.5) { choice[s.id] = best.id; taken.add(best.id); } else choice[s.id] = 'new';
+      }
+    } catch (e) { err = 'Nu mă pot conecta la Trupa: ' + (e.code || e.message); remote = null; }
+    render();
+  };
+  app.onchange = e => {
+    const sel = e.target.closest('[data-pick]'); if (!sel) return;
+    choice[sel.dataset.pick] = sel.value; render();
+  };
+  app.onclick = async e => {
+    const el = e.target.closest('[data-a]'); if (!el) return;
+    const a = el.dataset.a;
+    if (a === 'back') go('/setari');
+    if (a === 'retry') load();
+    if (a === 'apply' && !busy) {
+      busy = true; render();
+      try {
+        const r = await trupa.applyChoices(T, songs, choice);
+        T.enabled = true;
+        T.lastError = r.errors.join(' · ');
+        if (!r.errors.length) T.lastSync = Date.now();
+        trupaPending = [];
+        store.save();
+        if (r.errors.length) { busy = false; render(); alert('Unele piese nu s-au trimis:\n' + r.errors.join('\n')); return; }
+        toast(`Trupa: ${r.updated} actualizate, ${r.created} adăugate`);
+        go('/setari');
+      } catch (err2) { busy = false; render(); alert('Nu s-a putut trimite: ' + (err2.code || err2.message)); }
+    }
+  };
+  load();
+  return { destroy() { app.onchange = null; app.onclick = null; } };
 }
 
 async function exportData() {
@@ -582,6 +747,7 @@ async function exportData() {
 // ---------- pornire ----------
 updateShare();
 route();
+trupaSchedule(5000);
 // deblocare audio la primul gest (iOS)
 const unlockOnce = () => { engine.unlock(); };
 window.addEventListener('pointerdown', unlockOnce, { once: true });
