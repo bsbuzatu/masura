@@ -175,7 +175,7 @@ export async function applyChoices(T, songs, choice) {
         catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
         continue;
       }
-      try { T.links[s.id] = await create(payload(s)); T.synced[s.id] = s.updatedAt; res.updated++; }
+      try { T.links[s.id] = await create(payload(s)); T.synced[s.id] = s.updatedAt; res.created++; }
       catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
     } else {
       T.links[s.id] = c;
