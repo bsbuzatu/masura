@@ -4,7 +4,7 @@ import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.6.1';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
