@@ -5,7 +5,7 @@ import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
 import * as trupa from './trupa.js';
 
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.8.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -112,7 +112,8 @@ function structChips(song) {
 }
 function songSub(song) {
   const st = songStats(song);
-  return `${song.bpm} BPM · ${song.num}/${song.den} · ${fmtDuration(st.secs)}${st.openCount ? ' + deschis' : ''}`;
+  const key = String(song.key || '').trim();
+  return `${key ? esc(key) + ' · ' : ''}${song.bpm} BPM · ${song.num}/${song.den} · ${fmtDuration(st.secs)}${st.openCount ? ' + deschis' : ''}`;
 }
 
 // ---------- router ----------
@@ -260,6 +261,10 @@ function SongEditView(id) {
         </div>
         <div class="hint">BPM-ul se referă la unitatea de jos (pătrimi în x/4, optimi în x/8).</div>
       </div>
+      <div><label class="f" for="key">Gamă</label>
+        <input class="input" id="key" maxlength="40" value="${esc(song.key || '')}" placeholder="ex. Em, La minor, capo 2" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="hint">Apare pe scenă și pe monitorul colegilor.</div>
+      </div>
       <div><label class="f">Count-in · pregătire</label>
         <div class="stepper"><button data-a="prep-">−</button><input class="num" id="prep" inputmode="numeric" value="${song.countPrep}"><button data-a="prep+">+</button></div>
         <div class="hint">Timpi doar pentru tine.</div>
@@ -277,7 +282,7 @@ function SongEditView(id) {
     </div>
     <div class="summary" id="sum"></div>
     <h2 class="sec-h">Note piesă</h2>
-    <textarea class="input" id="notes" placeholder="Ex: tonalitate, cine începe, cue-uri…">${esc(song.notes)}</textarea>
+    <textarea class="input" id="notes" placeholder="Ex: cine începe, cue-uri…">${esc(song.notes)}</textarea>
     <div class="row" style="margin-top:28px"><button class="btn" data-a="dup-song">Duplică piesa</button><div class="spacer"></div><button class="btn danger" data-a="del-song">Șterge piesa</button></div>
     <datalist id="sectypes">${SECTION_TYPES.map(t => `<option value="${t.name}">`).join('')}</datalist>
   </div></div>`;
@@ -292,6 +297,7 @@ function SongEditView(id) {
 
   $('#title').oninput = e => { song.title = e.target.value; save(); };
   $('#notes').oninput = e => { song.notes = e.target.value; save(); };
+  $('#key').oninput = e => { song.key = e.target.value; save(); };
   $('#bpm').onchange = e => setNum('bpm', Math.round((parseFloat(e.target.value.replace(',', '.')) || 120) * 10) / 10, 20, 400, e.target);
   $('#num').onchange = e => { song.num = +e.target.value; if (song.countSticks === 4 && song.num !== 4) song.countSticks = song.num; $('#sticks').value = song.countSticks; save(); $('#sum').innerHTML = summary(); };
   $('#den').onchange = e => { song.den = +e.target.value; save(); };
@@ -502,7 +508,7 @@ function SettingsView() {
         <button class="btn" data-a="trupa-link">Verifică legăturile</button>
         <button class="btn danger" data-a="trupa-off">Oprește</button>
       </div>
-      <div class="hint">Se trimite automat când ai internet, după ce modifici o piesă (niciodată în timpul unui concert). În Trupa se schimbă doar titlul, BPM-ul, măsura și structura; voturile, linkurile, versurile și calendarele rămân neatinse. Piesele șterse aici nu se șterg din Trupa.</div>`;
+      <div class="hint">Se trimite automat când ai internet, după ce modifici o piesă (niciodată în timpul unui concert). În Trupa se schimbă doar titlul, BPM-ul, măsura, gama și structura; voturile, linkurile, versurile și calendarele rămân neatinse. Piesele șterse aici nu se șterg din Trupa.</div>`;
   };
   const render = () => {
     app.innerHTML = `<div class="shell"><div class="page">
@@ -515,8 +521,9 @@ function SettingsView() {
         ${vol('beat', 'Timpii 2, 3, 4…')}
         ${vol('sub', 'Optimi')}
         ${vol('flash', 'Flash vizual')}
+        <div class="slider-row"><span>Canal click</span><select class="input" id="clickch">${[['both', 'Ambele (stereo)'], ['left', 'Doar stânga'], ['right', 'Doar dreapta']].map(([v, l]) => `<option value="${v}" ${(S.vol.ch || 'both') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span></span></div>
         <div class="row"><button class="btn small" data-a="testclick" id="tc">▶ Probează (100 BPM)</button></div>
-        <div class="hint">„Timpii 2, 3, 4” pe 0 = auzi doar timpul 1. „Optimi” pe 0 = doar pătrimi. Count-in-ul se aude mereu, indiferent de aceste setări. Le poți regla și pe scenă, din butonul 🔊.</div>
+        <div class="hint">„Timpii 2, 3, 4” pe 0 = auzi doar timpul 1. „Optimi” pe 0 = doar pătrimi. Count-in-ul se aude mereu, indiferent de aceste setări. Le poți regla și pe scenă, din butonul 🔊.<br>„Canal click”: dacă intri cu un singur cablu stereo într-o intrare balansată (mixer, amplificator de căști), clickul identic pe stânga și dreapta se anulează și se aude foarte încet — alege „Doar stânga”.</div>
       </div>
 
       <h2 class="sec-h">Pedală / tastatură Bluetooth</h2>
@@ -561,6 +568,7 @@ function SettingsView() {
   const stopTester = () => { if (tester) tester.stop(); tester = null; };
 
   app.oninput = e => {
+    if (e.target.id === 'clickch') { engine.setChannel(e.target.value); store.save(); return; }
     const k = e.target.dataset.v; if (!k) return;
     const v = e.target.value / 100;
     if (k === 'flash') S.flash = v; else if (k === 'master') engine.setMaster(v); else S.vol[k] = v;
