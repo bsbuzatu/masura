@@ -58,10 +58,12 @@ export class ClickEngine {
       accent: this._tone(1760, 0.038, 0.12, 0.35),
       beat: this._tone(1320, 0.030, 0.10, 0.28),
       sub: this._tone(990, 0.018, 0.06, 0.20),
-      // count-in: tonuri moi, joase, fără transient — nu taie prin mix
-      ciPrep: this._soft(494, 0.06, 0.18),
-      ciStick: this._soft(392, 0.06, 0.18),
-      ciStickAcc: this._soft(523, 0.07, 0.20),
+      // count-in: trei registre diferite, ca să se audă clar în ce fază ești
+      //   pregătire = „tok” grav, de lemn (wood block)   — toți timpii identici
+      //   bețe      = „clac” mediu, sec, de rim-click     — toți timpii identici
+      //   piesa     = tick-urile înalte de mai sus (cu accent pe timpul 1)
+      ciPrep: this._wood(300, 0.035, 0.12, 0.25, 600),
+      ciStick: this._wood(760, 0.022, 0.10, 0.9, 2600),
     };
     this._applyAlive();
   }
@@ -80,6 +82,35 @@ export class ClickEngine {
       src.buffer = buf; src.loop = true; src.connect(this.ctx.destination); src.start(0);
       this._ka = src;
     } catch (e) { /* ignore */ }
+  }
+
+  // Sunet „de lemn”: ton scurt cu atac instant + un pocnet de zgomot filtrat (noise) în jurul lui `nz` Hz.
+  // `noise` = cât de mult pocnet față de ton (0 = doar ton). Normalizat la vârf, ca tick-urile.
+  _wood(freq, decay, dur, noise, nz) {
+    const sr = this.ctx.sampleRate;
+    const n = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, n, sr);
+    const d = buf.getChannelData(0);
+    let seed = 4242;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 1073741823.5 - 1; };
+    // rezonator simplu (filtru trece-bandă pe zgomot) → pocnetul are o culoare, nu e sâsâit
+    const w = 2 * Math.PI * nz / sr, r = 0.985;
+    let y1 = 0, y2 = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const att = Math.min(1, t / 0.0008);
+      const tone = (Math.sin(2 * Math.PI * freq * t) * 0.85 + Math.sin(2 * Math.PI * freq * 2.76 * t) * 0.15) * Math.exp(-t / decay);
+      const x = rnd() * Math.exp(-t / 0.004);
+      const y = x + 2 * r * Math.cos(w) * y1 - r * r * y2;
+      y2 = y1; y1 = y;
+      d[i] = (tone + y * 0.12 * noise) * att;
+    }
+    let peak = 0;
+    for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= 0.98 / peak;
+    const f = Math.min(n, Math.floor(sr * 0.006));
+    for (let i = 0; i < f; i++) d[n - 1 - i] *= i / f;
+    return buf;
   }
 
   // Ton moale: sinus pur, atac lent (4 ms), fără armonici înalte
@@ -366,8 +397,9 @@ export class Player {
     const play = (k, tt, l) => { const x = this.engine.play(k, tt, l); if (x) out.push(x); };
     // count-in: mereu la volumul accentului, ca să se audă chiar dacă timpii 2-4 sunt pe 0
     const ci = Math.max(v.accent, v.beat, 0.5);
+    // fără accent pe timpul 1 la count-in: toți timpii identici, diferă doar sunetul între pregătire și bețe
     if (ev.kind === 'prep') play('ciPrep', t, ci);
-    else if (ev.kind === 'sticks') play(ev.i === 0 ? 'ciStickAcc' : 'ciStick', t, ci);
+    else if (ev.kind === 'sticks') play('ciStick', t, ci);
     else if (ev.kind === 'beat') {
       if (ev.downbeat) play('accent', t, v.accent);
       else play('beat', t, v.beat);

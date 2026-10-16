@@ -29,7 +29,7 @@ export function PlayView(a, b, ctx) {
   app.innerHTML = `<div class="play ${monitor ? 'monitor' : ''}" id="play">
     <header class="p-top">
       <button class="x" data-a="exit" aria-label="Ieși">✕</button>
-      <div class="where num" id="where"></div>
+      <button class="where num" id="where" data-a="pick" aria-label="Alege piesa"></button>
       <div class="title" id="ttl"></div>
       <div class="meta num" id="meta"></div>
       <button class="x" data-a="vol" aria-label="Volum">🔊</button>
@@ -94,7 +94,8 @@ export function PlayView(a, b, ctx) {
     els.strip.innerHTML = s.sections.map(sec => {
       const n = sec.open ? 4 : sec.bars;
       const col = colorFor(sec.name);
-      return `<div class="s-blk ${sec.open ? 'open' : ''}"><div class="l">${esc(sec.name || '—')}${sec.open ? ' ↻' : ''}</div><div class="cells">${Array.from({ length: n }, () => `<b style="background:${col}"></b>`).join('')}</div></div>`;
+      // nota secțiunii se vede permanent în listă, nu doar când secțiunea e activă în cardul de sus
+      return `<div class="s-blk ${sec.open ? 'open' : ''}"><div class="l"><div class="nm">${esc(sec.name || '—')}${sec.open ? ' ↻' : ''}</div>${sec.note ? `<div class="n">${esc(sec.note)}</div>` : ''}</div><div class="cells">${Array.from({ length: n }, () => `<b style="background:${col}"></b>`).join('')}</div></div>`;
     }).join('');
     els.strip.querySelectorAll('.s-blk').forEach((blk, si) => { cells[si] = [...blk.querySelectorAll('.cells b')]; });
     moveStrip(-1, 0);
@@ -147,7 +148,9 @@ export function PlayView(a, b, ctx) {
 
   function header() {
     const s = song();
-    $('#where').textContent = songs.length > 1 ? `${idx + 1}/${songs.length}` : title;
+    const w = $('#where');
+    w.textContent = songs.length > 1 ? `${idx + 1}/${songs.length}` : title;
+    w.classList.toggle('pickable', !monitor && songs.length > 1);
     $('#ttl').textContent = s.title;
     const key = String(s.key || '').trim();
     $('#meta').innerHTML = `${key ? `<span class="key">${esc(key)}</span>` : ''}${s.bpm} BPM<small>${s.num}/${s.den}</small>`;
@@ -180,16 +183,18 @@ export function PlayView(a, b, ctx) {
     header();
     buildStrip();
     lastShown = {};
-    els.now.className = 'p-now';
+    els.now.className = 'p-now ready';
     els.barc.style.background = 'transparent';
     const st = songStats(s);
     const key = String(s.key || '').trim();
+    const notes = String(s.notes || '').trim();
+    // detaliile („începe doar solista” etc.) sunt importante doar ÎNAINTE de start: le punem mari, sub titlu
     els.nowc.innerHTML = `<div class="p-ready">
       ${finishedAll ? `<div class="sub" style="color:var(--ok);margin:0 0 8px">✓ Final de concert</div>` : ''}
       <div class="big">${esc(s.title)}</div>
+      ${notes ? `<div class="notes">${esc(notes)}</div>` : ''}
       ${key ? `<div class="keyline"><span>GAMĂ</span>${esc(key)}</div>` : ''}
       <div class="sub num">${s.bpm} BPM · ${s.num}/${s.den} · ${s.sections.length} secțiuni · ${fmtDuration(st.secs)}${st.openCount ? ' + deschis' : ''} · count-in ${s.countPrep}+${s.countSticks}</div>
-      ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
     </div>`;
     els.bcur.textContent = '–'; els.btot.textContent = '';
     dots(s.num);
@@ -357,8 +362,39 @@ export function PlayView(a, b, ctx) {
     }
     // o a treia apăsare imediat după STOP (pedală care „sare”) nu trebuie să schimbe piesa
     if (starting || now - stoppedAt < 700) return;
-    if (idx > 0) { idx--; finishedAll = false; showReady(); }
+    // oprit: B o dată = piesa următoare, B de două ori rapid = piesa anterioară
+    if (navT) { clearTimeout(navT); navT = null; goTo(idx - 1); return; }
+    navT = setTimeout(() => { navT = null; goTo(idx + 1); }, 380);
   }
+  let navT = null;
+  // sare la orice piesă din concert (doar oprit); de aici se poate relua concertul
+  function goTo(i) {
+    if (state === 'playing') return;
+    i = Math.max(0, Math.min(songs.length - 1, i));
+    if (i === idx) { updateControls(); return; }
+    idx = i; finishedAll = false; showReady();
+  }
+  let picker = null;
+  function openPicker() {
+    if (monitor || state === 'playing' || songs.length < 2) return;
+    closePicker();
+    const p = document.createElement('div');
+    p.className = 'modal-bg pick-bg';
+    p.innerHTML = `<div class="modal pick">
+      <div class="modal-h"><h3>${esc(title || 'Concert')}</h3><button class="x" data-a="pick-close" aria-label="Închide">✕</button></div>
+      <div class="modal-b"><div class="pick-list">${songs.map((s, i) => `<button class="pick-item ${i === idx ? 'on' : ''}" data-i="${i}"><span class="n num">${i + 1}</span><span class="t">${esc(s.title)}</span><span class="m num">${s.bpm}</span></button>`).join('')}</div></div>
+    </div>`;
+    p.onclick = e => {
+      const it = e.target.closest('.pick-item');
+      if (it) { goTo(+it.dataset.i); closePicker(); return; }
+      if (e.target === p || e.target.closest('[data-a="pick-close"]')) closePicker();
+    };
+    $('#play').appendChild(p);
+    picker = p;
+    const on = p.querySelector('.pick-item.on');
+    if (on) on.scrollIntoView({ block: 'center' });
+  }
+  function closePicker() { if (picker) { picker.remove(); picker = null; } }
 
   const keyA = k => DEFAULT_KEYS_A.includes(k) || S.keysA.includes(k);
   const keyB = k => DEFAULT_KEYS_B.includes(k) || S.keysB.includes(k);
@@ -412,8 +448,9 @@ export function PlayView(a, b, ctx) {
     }
     if (a === 'vol') toggleVol();
     if (a === 'go') actionA();
-    if (a === 'prev' && state !== 'playing' && idx > 0) { idx--; finishedAll = false; showReady(); }
-    if (a === 'next' && state !== 'playing' && idx < songs.length - 1) { idx++; finishedAll = false; showReady(); }
+    if (a === 'pick') openPicker();
+    if (a === 'prev') goTo(idx - 1);
+    if (a === 'next') goTo(idx + 1);
   };
 
   const onResize = () => { els.strip.style.transition = 'none'; moveStrip(stripPos[0], stripPos[1]); requestAnimationFrame(() => { els.strip.style.transition = ''; }); };
@@ -458,6 +495,7 @@ export function PlayView(a, b, ctx) {
     destroy() {
       if (broadcast) broadcast.send({ type: 'idle', setlist: title });
       player.stop();
+      clearTimeout(navT); closePicker();
       if (!monitor && engine.keepAlive) engine.keepAlive(false);
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', onKey);

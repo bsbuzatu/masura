@@ -6,8 +6,11 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const app = document.getElementById('app');
 
-// Ceasul monitorului = ceasul telefonului (sincronizat de rețea), în secunde
-const clock = { audibleNow: () => Date.now() / 1000, unlock: async () => true, ctx: null };
+// Ceasul monitorului = ceasul MASTERULUI: ceasul telefonului + decalajul măsurat prin ping/pong (vezi share.js).
+// Așa un Android cu ceasul dat peste cap rămâne în pas cu toboșarul.
+let rx = null;
+const masterNow = () => rx ? rx.now() : Date.now();
+const clock = { audibleNow: () => masterNow() / 1000, unlock: async () => true, ctx: null };
 
 /*
   VirtualPlayer — aceeași logică de structură ca Player-ul masterului, dar fără sunet:
@@ -71,7 +74,7 @@ class VirtualPlayer {
   }
   update() {
     if (!this.playing) return;
-    const k = Math.floor((Date.now() - this.t0) / this.spb);
+    const k = Math.floor((masterNow() - this.t0) / this.spb);
     if (k < 0 || k <= this.n) return;
     let ev;
     // dacă am rămas în urmă (ecran stins etc.), sărim direct la bătaia curentă
@@ -104,7 +107,7 @@ function askCode(err) {
   inp.onkeydown = e => { if (e.key === 'Enter') goNow(); };
 }
 
-let view = null, rx = null, watchdog = null, lastMsgAt = 0, lastState = null;
+let view = null, watchdog = null, lastMsgAt = 0, lastState = null;
 
 function start(code) {
   if (rx) rx.close();
@@ -119,8 +122,15 @@ function start(code) {
   const dot = $('#linkdot');
   const setDot = (cls, text) => { dot.hidden = false; dot.className = 'link-dot ' + cls; dot.textContent = text; };
   setDot('wait', `${code} · conectare…`);
+  let online = false;
+  const label = () => {
+    if (!online) return `${code} · fără internet`;
+    if (!rx || !rx.synced) return `${code} · conectat · ceas…`;
+    return `${code} · conectat · ceas ±${Math.max(1, Math.round(rx.rtt / 2))} ms`;
+  };
   rx = new Receiver(code, {
-    onStatus: ok => setDot(ok ? 'on' : 'off', ok ? `${code} · conectat` : `${code} · fără internet`),
+    onStatus: ok => { online = ok; setDot(ok ? 'on' : 'off', label()); },
+    onClock: () => { if (online) setDot('on', label()); },
     onState: s => {
       lastMsgAt = Date.now();
       lastState = s;
