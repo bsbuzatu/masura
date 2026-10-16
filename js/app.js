@@ -6,7 +6,7 @@ import { Broadcaster, newCode } from './share.js';
 import * as trupa from './trupa.js';
 import { MetroView, makeTapper, tapTime } from './metro.js';
 
-export const APP_VERSION = '1.9.0';
+export const APP_VERSION = '1.11.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -251,6 +251,9 @@ function SongEditView(id) {
       <button class="btn small" data-a="preview" id="pv">▶ Ascultă tempo</button>
       <button class="btn small primary" data-a="test">Testează pe scenă</button></div>
     <input class="input title-input" id="title" value="${esc(song.title)}" placeholder="Titlul piesei">
+    <label class="f" for="notes" style="margin-top:12px">Detalii înainte de start</label>
+    <textarea class="input" id="notes" placeholder="Ex: începe doar solista · chitara dă intro-ul · 2 măsuri hi-hat">${esc(song.notes)}</textarea>
+    <div class="hint">Apar mari în cardul principal, înainte de START și între piese (și pe monitorul colegilor). În timpul piesei dispar.</div>
     <div class="grid">
       <div><label class="f">Tempo (BPM)</label>
         <div class="stepper"><button data-a="bpm-">−</button><input class="num" id="bpm" inputmode="decimal" value="${song.bpm}"><button data-a="bpm+">+</button></div>
@@ -284,8 +287,6 @@ function SongEditView(id) {
       <button data-a="add" data-t=""><i style="background:#d0b48a"></i>ALTA…</button>
     </div>
     <div class="summary" id="sum"></div>
-    <h2 class="sec-h">Note piesă</h2>
-    <textarea class="input" id="notes" placeholder="Ex: cine începe, cue-uri…">${esc(song.notes)}</textarea>
     <div class="row" style="margin-top:28px"><button class="btn" data-a="dup-song">Duplică piesa</button><div class="spacer"></div><button class="btn danger" data-a="del-song">Șterge piesa</button></div>
     <datalist id="sectypes">${SECTION_TYPES.map(t => `<option value="${t.name}">`).join('')}</datalist>
   </div></div>`;
@@ -532,7 +533,7 @@ function SettingsView() {
       <h2 class="sec-h">Pedală / tastatură Bluetooth</h2>
       <div class="card">
         <div style="margin-bottom:10px"><b>Buton A</b> — Start piesă · în secțiunile deschise: măsura curentă devine ultima<br>${keysHtml('A')}</div>
-        <div style="margin-bottom:12px"><b>Buton B</b> — Piesa anterioară (când e oprit) · <b>apăsat de 2 ori rapid = STOP</b><br>${keysHtml('B')}</div>
+        <div style="margin-bottom:12px"><b>Buton B</b> — când e oprit: piesa următoare · de 2 ori rapid: piesa anterioară · în timpul piesei: <b>de 2 ori rapid = STOP</b><br>${keysHtml('B')}</div>
         <div class="row">
           <button class="btn small ${learn === 'A' ? 'primary' : ''}" data-a="learnA">${learn === 'A' ? 'Apasă pedala A…' : 'Învață tasta A'}</button>
           <button class="btn small ${learn === 'B' ? 'primary' : ''}" data-a="learnB">${learn === 'B' ? 'Apasă pedala B…' : 'Învață tasta B'}</button>
