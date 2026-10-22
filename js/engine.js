@@ -3,7 +3,9 @@
 
 const LOOKAHEAD_MS = 25;     // cât de des rulează programatorul
 const SCHEDULE_AHEAD = 0.12; // cât de departe în viitor programăm (secunde)
-const DRIVE = 3;             // cât de tare împingem clickul în limitator (1 = fără amplificare)
+// Nivel: fiecare sunet e normalizat la vârf (0,98 = −0,2 dBFS), iar volumele doar îl coboară.
+// Nu există amplificare sau limitator după el: la „Volum general” 100% ieșirea atinge exact vârful, niciodată peste.
+const PEAK = 0.98;
 
 export class ClickEngine {
   constructor(vol) {
@@ -46,12 +48,6 @@ export class ClickEngine {
     this.stalled = false; this._downAt = 0; this._advAt = 0; this._lastT = -1;
     this.out = this.ctx.createGain();
     this.out.gain.value = curve(this.vol.master);
-    // Limitator moale: clickul e amplificat de DRIVE ori și rotunjit sub nivelul maxim,
-    // așa că se aude mult mai tare fără să distorsioneze urât (un click scurt are puțină energie).
-    this.shaper = this.ctx.createWaveShaper();
-    this.shaper.curve = driveCurve();
-    this.shaper.oversample = '4x';
-    this.out.connect(this.shaper);
     this.merger = null;
     this._route();
     this.buffers = {
@@ -107,7 +103,7 @@ export class ClickEngine {
     }
     let peak = 0;
     for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
-    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= 0.98 / peak;
+    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= PEAK / peak;
     const f = Math.min(n, Math.floor(sr * 0.006));
     for (let i = 0; i < f; i++) d[n - 1 - i] *= i / f;
     return buf;
@@ -182,14 +178,14 @@ export class ClickEngine {
   // (acolo semnalul identic pe stânga și dreapta se anulează).
   _route() {
     if (!this.ctx) return;
-    try { this.shaper.disconnect(); } catch (e) { /* ignore */ }
+    try { this.out.disconnect(); } catch (e) { /* ignore */ }
     if (this.merger) { try { this.merger.disconnect(); } catch (e) { /* ignore */ } this.merger = null; }
     const ch = this.vol.ch;
     if (ch === 'left' || ch === 'right') {
       this.merger = this.ctx.createChannelMerger(2);
-      this.shaper.connect(this.merger, 0, ch === 'left' ? 0 : 1);
+      this.out.connect(this.merger, 0, ch === 'left' ? 0 : 1);
       this.merger.connect(this.ctx.destination);
-    } else this.shaper.connect(this.ctx.destination);
+    } else this.out.connect(this.ctx.destination);
   }
   setChannel(ch) {
     this.vol.ch = ch === 'left' || ch === 'right' ? ch : 'both';
@@ -220,7 +216,7 @@ export class ClickEngine {
     // normalizăm la vârf: fiecare click pleacă de la nivelul maxim, volumele îl coboară de acolo
     let peak = 0;
     for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
-    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= 0.98 / peak;
+    if (peak > 0) for (let i = 0; i < n; i++) d[i] *= PEAK / peak;
     // fade-out final ca să nu pocnească
     const f = Math.min(n, Math.floor(sr * 0.005));
     for (let i = 0; i < f; i++) d[n - 1 - i] *= i / f;
@@ -247,14 +243,8 @@ export class ClickEngine {
   }
 }
 
+// 0…1 → câștig; pătratul dă un slider care se simte liniar la ureche. Niciodată peste 1.
 function curve(v) { v = Math.max(0, Math.min(1, v)); return v * v; }
-
-// tanh(DRIVE·x), scalat sub 0 dBFS (cu rezervă pentru filtrul de supraeșantionare)
-function driveCurve() {
-  const n = 2049, c = new Float32Array(n), top = Math.tanh(DRIVE);
-  for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(DRIVE * x) / top * 0.92; }
-  return c;
-}
 
 // ---------- Timer în Worker (nu e frânat de randare) ----------
 // Un singur Worker pentru toată aplicația, oricâte playere apar (scenă, probă de tempo, metronom).
@@ -339,7 +329,7 @@ export class Player {
     this.armed = null;
   }
 
-  // Apelat de pedală / buton. Returnează: 'armed' | 'already' | 'ignored'
+  // Apelat de butonul GO. Returnează: 'armed' | 'already' | 'ignored'
   arm() {
     if (!this.playing) return 'ignored';
     const c = this.current;
@@ -434,7 +424,7 @@ export class Player {
         else next = p.bar + 1 >= sec.bars;
         if (next) {
           p.sec++; p.bar = 0;
-          if (p.sec >= s.sections.length) p.phase = 'done';
+          if (p.sec >= this.song.sections.length) p.phase = 'done';
         } else p.bar++;
       }
       return ev;
