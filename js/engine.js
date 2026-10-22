@@ -424,7 +424,7 @@ export class Player {
         else next = p.bar + 1 >= sec.bars;
         if (next) {
           p.sec++; p.bar = 0;
-          if (p.sec >= this.song.sections.length) p.phase = 'done';
+          if (p.sec >= s.sections.length) p.phase = 'done';
         } else p.bar++;
       }
       return ev;
