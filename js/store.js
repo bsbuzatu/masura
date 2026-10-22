@@ -15,11 +15,26 @@ export const SECTION_TYPES = [
 ];
 const CUSTOM_COLOR = '#d0b48a';
 
+// Paleta pentru culoarea aleasă manual pe o secțiune (vizibilă pe scenă, pe fundal închis).
+export const PALETTE = [
+  ['#6c8cff', 'Albastru'], ['#4fb3ff', 'Azur'], ['#2fd4c4', 'Turcoaz'], ['#3fbf7f', 'Verde'],
+  ['#a6c13a', 'Lime'], ['#ffd23f', 'Galben'], ['#ffb020', 'Portocaliu'], ['#ff6b4a', 'Cărămiziu'],
+  ['#ff4d6d', 'Roșu'], ['#ff6fa8', 'Roz'], ['#b07cff', 'Mov'], ['#d0b48a', 'Nisip'],
+  ['#ffffff', 'Alb'], ['#9aa0a6', 'Gri'],
+];
+export const isColor = c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+
 export function baseName(name) {
   return String(name || '').toUpperCase().replace(/\s*\d+\s*$/, '').trim();
 }
-export function colorFor(name) {
-  const b = baseName(name);
+// Culoarea unei secțiuni: cea aleasă manual (sec.color), altfel după tipul din nume.
+// Acceptă și un simplu nume (string), pentru compatibilitate.
+export function colorFor(sec) {
+  if (sec && typeof sec === 'object') {
+    if (isColor(sec.color)) return sec.color;
+    sec = sec.name;
+  }
+  const b = baseName(sec);
   const t = SECTION_TYPES.find(t => t.name === b);
   return t ? t.color : CUSTOM_COLOR;
 }
@@ -29,8 +44,6 @@ export const uid = () => Date.now().toString(36) + Math.random().toString(36).sl
 export const DEFAULT_SETTINGS = {
   vol: { master: 0.85, accent: 0.9, beat: 0.6, sub: 0, ch: 'both' }, // ch: 'both' | 'left' | 'right'
   flash: 0.7,
-  keysA: [], // taste învățate în plus față de cele implicite
-  keysB: [],
   share: { enabled: false, code: '' }, // monitor pentru colegi
 };
 
@@ -108,6 +121,7 @@ function normalizeSong(s) {
   out.sections = (Array.isArray(s.sections) ? s.sections : []).map(x => ({
     id: x.id || uid(), name: String(x.name ?? ''), bars: clamp(parseInt(x.bars) || 1, 1, 999),
     open: !!x.open, note: String(x.note ?? ''),
+    ...(isColor(x.color) ? { color: x.color.toLowerCase() } : {}),
   }));
   return out;
 }
@@ -128,6 +142,7 @@ export class Store {
       d.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(d.settings || {}) };
       d.settings.vol = { ...DEFAULT_SETTINGS.vol, ...(d.settings.vol || {}) };
       d.settings.share = { ...DEFAULT_SETTINGS.share, ...(d.settings.share || {}) };
+      delete d.settings.keysA; delete d.settings.keysB; // pedala a fost scoasă (v1.12)
       return d;
     } catch (e) {
       console.error(e);
@@ -184,7 +199,7 @@ export class Store {
       if (d.settings) {
         // modificăm obiectul existent (e partajat cu motorul audio)
         const cur = this.data.settings;
-        const { vol, ...rest } = d.settings;
+        const { vol, keysA, keysB, ...rest } = d.settings; // keysA/keysB: setări vechi de pedală, ignorate
         Object.assign(cur, rest);
         if (vol) Object.assign(cur.vol, vol);
       }

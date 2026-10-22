@@ -22,7 +22,28 @@ const PART_MAP = {
   'OUTRO': 'Outro', 'JOC PUBLIC': 'Joc cu publicul',
 };
 
-export const DEFAULT_TRUPA = { enabled: false, links: {}, skip: [], synced: {}, lastSync: 0, lastError: '' };
+export const DEFAULT_TRUPA = { enabled: false, links: {}, skip: [], synced: {}, orderKey: '', lastSync: 0, lastError: '' };
+
+// Concertul „activ” = cel mai apropiat ca dată: primul viitor (azi inclusiv), altfel cel mai recent trecut.
+// Ordinea pieselor lui devine ordinea pieselor în Trupa; restul pieselor rămân după ele.
+export function activeSetlist(setlists, today = new Date()) {
+  const sl = (setlists || []).filter(s => s && Array.isArray(s.songIds) && s.songIds.length);
+  if (!sl.length) return null;
+  const t = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const dated = sl.filter(s => s.date);
+  const future = dated.filter(s => s.date >= t).sort((a, b) => a.date.localeCompare(b.date));
+  if (future.length) return future[0];
+  const past = dated.sort((a, b) => b.date.localeCompare(a.date));
+  if (past.length) return past[0];
+  return [...sl].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+}
+// poziția fiecărei piese în concertul activ: { songId → 1, 2, 3… } + numele concertului
+export function concertOrder(setlists, today) {
+  const sl = activeSetlist(setlists, today);
+  const pos = {};
+  if (sl) sl.songIds.forEach((id, i) => { if (!(id in pos)) pos[id] = i + 1; });
+  return { name: sl ? String(sl.name || 'Concert') : '', pos, key: sl ? `${sl.name}|${sl.songIds.join(',')}` : '' };
+}
 
 export function partLabel(name) {
   const raw = String(name || '').trim();
@@ -33,10 +54,15 @@ export function partLabel(name) {
 }
 
 // ce scrie Măsura într-o piesă din Trupa (nimic altceva)
-export function payload(song) {
+// `order` = { name, pos } din concertOrder(): piesa din concert primește masuraOrder (1, 2, 3…) și masuraConcert (numele);
+// o piesă din afara concertului primește masuraOrder: null (Trupa o pune după cele din concert).
+export function payload(song, order = null) {
   const secs = song.sections || [];
   const bpm = Math.round(Number(song.bpm));
+  const inConcert = !!(order && order.pos[song.id]);
   return {
+    masuraOrder: inConcert ? order.pos[song.id] : null,
+    masuraConcert: inConcert ? order.name : '',
     title: String(song.title || '').trim() || 'Fără titlu',
     bpm: Number.isFinite(bpm) && bpm >= 30 && bpm <= 300 ? bpm : null,
     structure: secs.map(s => partLabel(s.name)),
@@ -116,6 +142,9 @@ async function create(data) {
  */
 export async function sync(T, songs, opts = {}) {
   const res = { updated: 0, created: 0, linked: 0, pending: [], errors: [] };
+  const order = concertOrder(opts.setlists || []);
+  // dacă s-a schimbat concertul activ sau ordinea lui, retrimitem toate piesele legate (ordinea e scrisă pe fiecare piesă)
+  const orderChanged = (T.orderKey || '') !== order.key;
   const remote = await fetchTrupaSongs();
   const byId = new Map(remote.map(r => [r.id, r]));
   const ids = new Set(songs.map(s => s.id));
@@ -140,21 +169,23 @@ export async function sync(T, songs, opts = {}) {
       if (exact) { T.links[s.id] = tid = exact.id; res.linked++; }
       else if (free.some(r => similarity(r.title, s.title) >= 0.5)) { res.pending.push(s.id); continue; }
       else {
-        try { tid = await create(payload(s)); T.links[s.id] = tid; T.synced[s.id] = s.updatedAt; res.created++; }
+        try { tid = await create(payload(s, order)); T.links[s.id] = tid; T.synced[s.id] = s.updatedAt; res.created++; }
         catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
         continue;
       }
     }
-    if (!opts.force && T.synced[s.id] === s.updatedAt) continue;
-    try { await update(tid, payload(s)); T.synced[s.id] = s.updatedAt; res.updated++; }
+    if (!opts.force && !orderChanged && T.synced[s.id] === s.updatedAt) continue;
+    try { await update(tid, payload(s, order)); T.synced[s.id] = s.updatedAt; res.updated++; }
     catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
   }
+  if (!res.errors.length) T.orderKey = order.key;
   return res;
 }
 
 // aplică alegerile din ecranul de legare: choice[songId] = 'new' | 'skip' | <trupaDocId>
-export async function applyChoices(T, songs, choice) {
+export async function applyChoices(T, songs, choice, setlists = []) {
   const res = { updated: 0, created: 0, linked: 0, pending: [], errors: [] };
+  const order = concertOrder(setlists);
   for (const s of songs) {
     const c = choice[s.id];
     if (!c) continue;
@@ -171,15 +202,15 @@ export async function applyChoices(T, songs, choice) {
     if (c === 'new') {
       if (prev && prev !== c) delete T.links[s.id];
       if (T.links[s.id]) { // deja creată: doar actualizăm
-        try { await update(T.links[s.id], payload(s)); T.synced[s.id] = s.updatedAt; res.updated++; }
+        try { await update(T.links[s.id], payload(s, order)); T.synced[s.id] = s.updatedAt; res.updated++; }
         catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
         continue;
       }
-      try { T.links[s.id] = await create(payload(s)); T.synced[s.id] = s.updatedAt; res.created++; }
+      try { T.links[s.id] = await create(payload(s, order)); T.synced[s.id] = s.updatedAt; res.created++; }
       catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
     } else {
       T.links[s.id] = c;
-      try { await update(c, payload(s)); T.synced[s.id] = s.updatedAt; res.updated++; }
+      try { await update(c, payload(s, order)); T.synced[s.id] = s.updatedAt; res.updated++; }
       catch (e) { res.errors.push(`${s.title}: ${e.code || e.message}`); }
     }
   }

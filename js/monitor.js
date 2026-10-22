@@ -116,7 +116,7 @@ function start(code) {
   try { localStorage.setItem('masura.monitor.code', code); } catch (e) { /* ignore */ }
   view = PlayView(null, null, {
     app, store: null, S: { flash: 0.7 }, engine: clock, $, esc, toast: () => {}, go: () => {},
-    DEFAULT_KEYS_A: [], DEFAULT_KEYS_B: [], monitor: true,
+    monitor: true,
     makePlayer: h => new VirtualPlayer(h),
   });
   const dot = $('#linkdot');
