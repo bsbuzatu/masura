@@ -4,7 +4,7 @@ import { Player } from './engine.js';
 
 // ================= SCENĂ =================
 export function PlayView(a, b, ctx) {
-  const { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B } = ctx;
+  const { app, store, S, engine, $, esc, toast, go } = ctx;
   const monitor = !!ctx.monitor;      // monitor = doar afișare, comandat de la distanță
   const broadcast = ctx.broadcast;    // master: transmite starea către monitoare (opțional)
   // /scena/<setlistId> sau /scena/piesa/<songId>
@@ -21,7 +21,6 @@ export function PlayView(a, b, ctx) {
   let cells = [];   // cells[sec][bar] → element
   const CELL = 20;  // 18 + gap 2
   let lastShown = {};
-  let bPressAt = 0, stoppedAt = 0;
 
   const handlers = { onBeat: ev => showBeat(ev), onEnd: () => songEnded() };
   const player = ctx.makePlayer ? ctx.makePlayer(handlers) : new Player(engine, handlers);
@@ -93,7 +92,7 @@ export function PlayView(a, b, ctx) {
     cells = [];
     els.strip.innerHTML = s.sections.map(sec => {
       const n = sec.open ? 4 : sec.bars;
-      const col = colorFor(sec.name);
+      const col = colorFor(sec);
       // nota secțiunii se vede permanent în listă, nu doar când secțiunea e activă în cardul de sus
       return `<div class="s-blk ${sec.open ? 'open' : ''}"><div class="l"><div class="nm">${esc(sec.name || '—')}${sec.open ? ' ↻' : ''}</div>${sec.note ? `<div class="n">${esc(sec.note)}</div>` : ''}</div><div class="cells">${Array.from({ length: n }, () => `<b style="background:${col}"></b>`).join('')}</div></div>`;
     }).join('');
@@ -266,15 +265,15 @@ export function PlayView(a, b, ctx) {
       const key = `${ev.sec}:${ev.bar}:${armed ? 1 : 0}`;
       if (lastShown.key !== key) {
         if (lastShown.sec !== ev.sec || lastShown.kind !== 'beat') {
-          els.nowc.innerHTML = `<div class="sec-name" style="color:${colorFor(sec.name)}">${esc(sec.name || '—')}</div>${sec.note ? `<div class="sec-note">${esc(sec.note)}</div>` : ''}<div class="status" id="st"></div>`;
-          els.barc.style.background = colorFor(sec.name);
+          els.nowc.innerHTML = `<div class="sec-name" style="color:${colorFor(sec)}">${esc(sec.name || '—')}</div>${sec.note ? `<div class="sec-note">${esc(sec.note)}</div>` : ''}<div class="status" id="st"></div>`;
+          els.barc.style.background = colorFor(sec);
           dots(s.num);
         }
         const st = $('#st');
         if (sec.open) {
           els.bcur.textContent = ev.bar + 1; els.btot.textContent = '↻';
           if (isLast) { els.now.className = 'p-now armed last-bar'; st.innerHTML = `<span style="color:var(--armed)">ULTIMA MĂSURĂ → ${esc(nxt ? nxt.name : 'FINAL')}</span>`; }
-          else { els.now.className = 'p-now open-sec'; st.innerHTML = `<span style="color:var(--open)">↻ Deschisă · pedala A = ultima măsură</span>`; }
+          else { els.now.className = 'p-now open-sec'; st.innerHTML = `<span style="color:var(--open)">↻ Deschisă · GO = ultima măsură</span>`; }
         } else {
           els.bcur.textContent = ev.bar + 1; els.btot.textContent = '/' + sec.bars;
           els.now.className = 'p-now' + (isLast ? ' last-bar' : '');
@@ -352,21 +351,6 @@ export function PlayView(a, b, ctx) {
     if (r === 'armed') { lastShown.key = null; if (player.current) showBeat(player.current); emit(); }
     updateControls();
   }
-  function actionB() {
-    const now = performance.now();
-    if (state === 'playing') {
-      if (now - bPressAt < 600) { stop(); toast('Oprit'); bPressAt = 0; stoppedAt = now; return; }
-      bPressAt = now;
-      toast('Apasă B încă o dată rapid pentru STOP');
-      return;
-    }
-    // o a treia apăsare imediat după STOP (pedală care „sare”) nu trebuie să schimbe piesa
-    if (starting || now - stoppedAt < 700) return;
-    // oprit: B o dată = piesa următoare, B de două ori rapid = piesa anterioară
-    if (navT) { clearTimeout(navT); navT = null; goTo(idx - 1); return; }
-    navT = setTimeout(() => { navT = null; goTo(idx + 1); }, 380);
-  }
-  let navT = null;
   // sare la orice piesă din concert (doar oprit); de aici se poate relua concertul
   function goTo(i) {
     if (state === 'playing') return;
@@ -395,17 +379,6 @@ export function PlayView(a, b, ctx) {
     if (on) on.scrollIntoView({ block: 'center' });
   }
   function closePicker() { if (picker) { picker.remove(); picker = null; } }
-
-  const keyA = k => DEFAULT_KEYS_A.includes(k) || S.keysA.includes(k);
-  const keyB = k => DEFAULT_KEYS_B.includes(k) || S.keysB.includes(k);
-  const onKey = e => {
-    if (monitor) return;
-    if (e.repeat) { e.preventDefault(); return; }
-    if (e.target.closest && e.target.closest('input,textarea,select')) return;
-    if (keyA(e.key)) { e.preventDefault(); actionA(); }
-    else if (keyB(e.key)) { e.preventDefault(); actionB(); }
-  };
-  window.addEventListener('keydown', onKey);
 
   // STOP pe ecran: ține apăsat ~0,8 s
   let holdT = null;
@@ -495,10 +468,9 @@ export function PlayView(a, b, ctx) {
     destroy() {
       if (broadcast) broadcast.send({ type: 'idle', setlist: title });
       player.stop();
-      clearTimeout(navT); closePicker();
+      closePicker();
       if (!monitor && engine.keepAlive) engine.keepAlive(false);
       cancelAnimationFrame(raf);
-      window.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVis);
       destroyed = true;

@@ -97,7 +97,7 @@ class Metro {
 
 // ================= ECRANUL METRONOM =================
 export function MetroView(ctx) {
-  const { app, store, S, engine, $, toast, tabs, DEFAULT_KEYS_A, DEFAULT_KEYS_B } = ctx;
+  const { app, store, S, engine, $, toast, tabs } = ctx;
   S.metro = { ...DEFAULT_METRO, ...(S.metro || {}) };
   const M = S.metro;
   M.bpm = clamp(Math.round(Number(M.bpm)) || 120, BPM_MIN, BPM_MAX);
@@ -141,7 +141,7 @@ export function MetroView(ctx) {
         <button class="m-start" id="mstart">START</button>
       </div>
     </div>
-    <div class="hint">Pedală: A = start / stop, B = tap. Merge doar pe acest telefon; colegii nu îl văd în Monitor.</div>
+    <div class="hint">Merge doar pe acest telefon; colegii nu îl văd în Monitor.</div>
   </div>${tabs('metro')}</div>`;
 
   const els = { bpm: $('#mbpm'), name: $('#mname'), dots: $('#mdots'), flash: $('#mflash'), range: $('#mrange'), sub: $('#msub'), tap: $('#mtap'), tapn: $('#mtapn'), start: $('#mstart'), vol: $('#mvol') };
@@ -255,17 +255,6 @@ export function MetroView(ctx) {
     save();
   });
 
-  // ---- pedală / tastatură: A = start/stop, B (sau T) = tap ----
-  const keyA = k => DEFAULT_KEYS_A.includes(k) || S.keysA.includes(k);
-  const keyB = k => DEFAULT_KEYS_B.includes(k) || S.keysB.includes(k);
-  const onKey = e => {
-    if (e.target.closest && e.target.closest('input,textarea,select')) return;
-    if (e.repeat) { e.preventDefault(); return; }
-    if (keyB(e.key) || e.key === 't' || e.key === 'T') { e.preventDefault(); tap(tapTime(e)); }
-    else if (keyA(e.key)) { e.preventDefault(); toggle(); }
-  };
-  window.addEventListener('keydown', onKey);
-
   function frame() {
     if (metro.playing && engine.lost) { stop(); toast('Sunetul s-a întrerupt — apasă START'); }
     metro.update();
@@ -288,7 +277,6 @@ export function MetroView(ctx) {
       holdEnd();
       cancelAnimationFrame(raf);
       clearTimeout(saveT); clearTimeout(tapOffT);
-      window.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onVis);
       wakeOff();
       engine.keepAlive(false);
