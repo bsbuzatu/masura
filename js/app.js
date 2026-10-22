@@ -1,12 +1,12 @@
 // Măsura — interfață
-import { Store, SECTION_TYPES, colorFor, baseName, uid, newSong, newSetlist, songStats, fmtDuration, clamp } from './store.js';
+import { Store, SECTION_TYPES, PALETTE, colorFor, baseName, uid, newSong, newSetlist, songStats, fmtDuration, clamp } from './store.js';
 import { ClickEngine, Player } from './engine.js';
 import { PlayView } from './play.js';
 import { Broadcaster, newCode } from './share.js';
 import * as trupa from './trupa.js';
 import { MetroView, makeTapper, tapTime } from './metro.js';
 
-export const APP_VERSION = '1.11.0';
+export const APP_VERSION = '1.12.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -46,7 +46,7 @@ async function trupaRun(opts = {}) {
   if (trupaBusy) return null;
   trupaBusy = true; refreshTrupaCard();
   try {
-    const r = await trupa.sync(S.trupa, store.data.songs, opts);
+    const r = await trupa.sync(S.trupa, store.data.songs, { ...opts, setlists: store.data.setlists });
     trupaPending = r.pending;
     S.trupa.lastError = r.errors.join(' · ');
     if (!r.errors.length) S.trupa.lastSync = Date.now();
@@ -68,18 +68,17 @@ function trupaSchedule(ms = 4000) {
   }, ms);
 }
 function refreshTrupaCard() { if (current && current.onTrupa) current.onTrupa(); }
-{ // orice salvare/ștergere de piesă programează o sincronizare
+{ // orice salvare/ștergere de piesă sau de concert programează o sincronizare (ordinea din concert ajunge în Trupa)
   const up = store.upsertSong.bind(store), del = store.deleteSong.bind(store);
+  const upS = store.upsertSetlist.bind(store), delS = store.deleteSetlist.bind(store);
   store.upsertSong = s => { up(s); trupaSchedule(); };
   store.deleteSong = id => { del(id); trupaSchedule(); };
+  store.upsertSetlist = sl => { upS(sl); trupaSchedule(); };
+  store.deleteSetlist = id => { delS(id); trupaSchedule(); };
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') trupaSchedule(2000); });
 window.addEventListener('online', () => trupaSchedule(2000));
 window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/scena')) trupaSchedule(3000); });
-
-const DEFAULT_KEYS_A = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'];
-const DEFAULT_KEYS_B = ['ArrowLeft', 'ArrowUp', 'PageUp'];
-const keyName = k => k === ' ' ? 'Space' : k;
 
 // ---------- utilitare ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -110,7 +109,7 @@ function tabs(on) {
 
 function structChips(song) {
   const tot = song.sections.reduce((a, s) => a + (s.open ? 4 : s.bars), 0) || 1;
-  return `<div class="chips">${song.sections.map(s => `<span style="flex:${(s.open ? 4 : s.bars) / tot};background:${colorFor(s.name)}"></span>`).join('')}</div>`;
+  return `<div class="chips">${song.sections.map(s => `<span style="flex:${(s.open ? 4 : s.bars) / tot};background:${colorFor(s)}"></span>`).join('')}</div>`;
 }
 function songSub(song) {
   const st = songStats(song);
@@ -128,8 +127,8 @@ function route() {
   if (a === 'piese') current = SongsView();
   else if (a === 'piesa') current = SongEditView(b);
   else if (a === 'concert') current = SetlistEditView(b);
-  else if (a === 'scena') { current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, DEFAULT_KEYS_A, DEFAULT_KEYS_B, broadcast: broadcaster }); setLinkDot(); }
-  else if (a === 'metronom') current = MetroView({ app, store, S, engine, $, toast, tabs, DEFAULT_KEYS_A, DEFAULT_KEYS_B });
+  else if (a === 'scena') { current = PlayView(b, c, { app, store, S, engine, $, esc, toast, go, broadcast: broadcaster }); setLinkDot(); }
+  else if (a === 'metronom') current = MetroView({ app, store, S, engine, $, toast, tabs });
   else if (a === 'setari') current = SettingsView();
   else if (a === 'trupa') current = TrupaLinkView();
   else current = SetlistsView();
@@ -217,7 +216,7 @@ function SongEditView(id) {
 
   const secRow = (s, i) => `
     <div class="sec-row" data-i="${i}">
-      <div class="c" style="background:${colorFor(s.name)}"></div>
+      <button class="c" data-a="color" style="background:${colorFor(s)}" title="Culoare" aria-label="Culoarea secțiunii"></button>
       <div class="name"><input class="input" list="sectypes" value="${esc(s.name)}" data-f="name" placeholder="Nume secțiune" autocapitalize="characters"></div>
       <div class="bars"><div class="stepper ${s.open ? 'dis' : ''}">
         <button data-a="bars-" tabindex="-1">−</button>
@@ -323,7 +322,7 @@ function SongEditView(id) {
     const row = e.target.closest('.sec-row'); if (!row) return;
     const s = song.sections[+row.dataset.i];
     const f = e.target.dataset.f;
-    if (f === 'name') { s.name = e.target.value.toUpperCase(); row.querySelector('.c').style.background = colorFor(s.name); }
+    if (f === 'name') { s.name = e.target.value.toUpperCase(); row.querySelector('.c').style.background = colorFor(s); }
     if (f === 'note') s.note = e.target.value;
     if (f === 'bars') { const v = parseInt(e.target.value); if (v > 0) { s.bars = clamp(v, 1, 999); $('#sum').innerHTML = summary(); } }
     save();
@@ -337,6 +336,36 @@ function SongEditView(id) {
       if (t && t.open && !s.open) { s.open = true; save(); renderSections(); }
     }
   });
+
+  // alegerea culorii unei secțiuni: foaie cu paleta + „Implicit” (după numele secțiunii)
+  let colorSheet = null;
+  function closeColors() { if (colorSheet) { colorSheet.remove(); colorSheet = null; } }
+  function openColors(i) {
+    closeColors();
+    const s = song.sections[i]; if (!s) return;
+    const auto = colorFor({ name: s.name });
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-bg';
+    sheet.innerHTML = `<div class="modal colors">
+      <div class="modal-h"><h3>${esc(s.name || 'Secțiune')} · culoare</h3><button class="x" data-c="close" aria-label="Închide">✕</button></div>
+      <div class="modal-b">
+        <div class="swatches">
+          <button class="sw auto ${s.color ? '' : 'on'}" data-c="auto" style="--sw:${auto}"><i></i><span>Implicit</span></button>
+          ${PALETTE.map(([c, n]) => `<button class="sw ${s.color === c ? 'on' : ''}" data-c="${c}" style="--sw:${c}"><i></i><span>${n}</span></button>`).join('')}
+        </div>
+        <div class="hint">„Implicit” = culoarea după tipul secțiunii (INTRO, STROFA, REFREN…); numele proprii primesc nisip. Culoarea aleasă se vede pe scenă și la colegi, în Monitor.</div>
+      </div></div>`;
+    sheet.onclick = e => {
+      const b = e.target.closest('[data-c]');
+      if (!b) { if (e.target === sheet) closeColors(); return; }
+      const c = b.dataset.c;
+      if (c === 'close') { closeColors(); return; }
+      if (c === 'auto') delete s.color; else s.color = c;
+      save(); closeColors(); renderSections();
+    };
+    app.appendChild(sheet);
+    colorSheet = sheet;
+  }
 
   function startPreview() {
     const p = new Player(engine, {});
@@ -369,6 +398,7 @@ function SongEditView(id) {
         row.querySelector('[data-f=bars]').value = s.bars; save(); $('#sum').innerHTML = summary(); break;
       }
       case 'open': song.sections[i].open = !song.sections[i].open; save(); renderSections(); break;
+      case 'color': openColors(i); break;
       case 'up': if (i > 0) { const x = song.sections.splice(i, 1)[0]; song.sections.splice(i - 1, 0, x); save(); renderSections(); } break;
       case 'down': if (i < song.sections.length - 1) { const x = song.sections.splice(i, 1)[0]; song.sections.splice(i + 1, 0, x); save(); renderSections(); } break;
       case 'dup': song.sections.splice(i + 1, 0, { ...structuredClone(song.sections[i]), id: uid() }); save(); renderSections(); break;
@@ -395,7 +425,7 @@ function SongEditView(id) {
       }
     }
   };
-  return { destroy() { stopPreview(); saveNow.call(null); } };
+  return { destroy() { stopPreview(); closeColors(); saveNow.call(null); } };
 }
 
 // ================= EDITOR CONCERT =================
@@ -469,13 +499,7 @@ function SetlistEditView(id) {
 
 // ================= SETĂRI =================
 function SettingsView() {
-  let learn = null; // 'A' | 'B'
   const vol = (k, label) => `<div class="slider-row"><span>${label}</span><input type="range" min="0" max="100" value="${Math.round((k === 'flash' ? S.flash : S.vol[k]) * 100)}" data-v="${k}"><span class="num" data-vv="${k}">${Math.round((k === 'flash' ? S.flash : S.vol[k]) * 100)}</span></div>`;
-  const keysHtml = w => {
-    const def = w === 'A' ? DEFAULT_KEYS_A : DEFAULT_KEYS_B;
-    const extra = w === 'A' ? S.keysA : S.keysB;
-    return def.map(k => `<span class="keycap">${esc(keyName(k))}</span>`).join('') + extra.map(k => `<span class="keycap" style="border-color:var(--accent)">${esc(keyName(k))}</span>`).join('');
-  };
   const shareHtml = () => {
     const on = S.share.enabled && S.share.code;
     if (!on) return `<div class="hint" style="margin:0 0 12px">Colegii văd pe telefonul lor exact ecranul tău de scenă (fără sunet), prin internet mobil. Funcționează pe orice telefon, într-un browser.</div>
@@ -512,7 +536,7 @@ function SettingsView() {
         <button class="btn" data-a="trupa-link">Verifică legăturile</button>
         <button class="btn danger" data-a="trupa-off">Oprește</button>
       </div>
-      <div class="hint">Se trimite automat când ai internet, după ce modifici o piesă (niciodată în timpul unui concert). În Trupa se schimbă doar titlul, BPM-ul, măsura, gama și structura; voturile, linkurile, versurile și calendarele rămân neatinse. Piesele șterse aici nu se șterg din Trupa.</div>`;
+      <div class="hint">Se trimite automat când ai internet, după ce modifici o piesă (niciodată în timpul unui concert). În Trupa se schimbă doar titlul, BPM-ul, măsura, gama, structura și ordinea (piesele urmează ordinea din concertul cel mai apropiat ca dată, marcate cu numele lui); voturile, linkurile, versurile și calendarele rămân neatinse. Piesele șterse aici nu se șterg din Trupa.</div>`;
   };
   const render = () => {
     app.innerHTML = `<div class="shell"><div class="page">
@@ -528,18 +552,6 @@ function SettingsView() {
         <div class="slider-row"><span>Canal click</span><select class="input" id="clickch">${[['both', 'Ambele (stereo)'], ['left', 'Doar stânga'], ['right', 'Doar dreapta']].map(([v, l]) => `<option value="${v}" ${(S.vol.ch || 'both') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span></span></div>
         <div class="row"><button class="btn small" data-a="testclick" id="tc">▶ Probează (100 BPM)</button></div>
         <div class="hint">„Timpii 2, 3, 4” pe 0 = auzi doar timpul 1. „Optimi” pe 0 = doar pătrimi. Count-in-ul se aude mereu, indiferent de aceste setări. Le poți regla și pe scenă, din butonul 🔊.<br>„Canal click”: dacă intri cu un singur cablu stereo într-o intrare balansată (mixer, amplificator de căști), clickul identic pe stânga și dreapta se anulează și se aude foarte încet — alege „Doar stânga”.</div>
-      </div>
-
-      <h2 class="sec-h">Pedală / tastatură Bluetooth</h2>
-      <div class="card">
-        <div style="margin-bottom:10px"><b>Buton A</b> — Start piesă · în secțiunile deschise: măsura curentă devine ultima<br>${keysHtml('A')}</div>
-        <div style="margin-bottom:12px"><b>Buton B</b> — când e oprit: piesa următoare · de 2 ori rapid: piesa anterioară · în timpul piesei: <b>de 2 ori rapid = STOP</b><br>${keysHtml('B')}</div>
-        <div class="row">
-          <button class="btn small ${learn === 'A' ? 'primary' : ''}" data-a="learnA">${learn === 'A' ? 'Apasă pedala A…' : 'Învață tasta A'}</button>
-          <button class="btn small ${learn === 'B' ? 'primary' : ''}" data-a="learnB">${learn === 'B' ? 'Apasă pedala B…' : 'Învață tasta B'}</button>
-          <button class="btn small ghost" data-a="resetkeys">Resetează</button>
-        </div>
-        <div class="hint" id="lastkey">Apasă orice buton al pedalei ca să vezi ce tastă trimite.</div>
       </div>
 
       <h2 class="sec-h">Monitor pentru colegi</h2>
@@ -589,8 +601,6 @@ function SettingsView() {
       tester.load({ bpm: 100, num: 4, den: 4, countPrep: 0, countSticks: 0, sections: [{ name: '', bars: 1, open: true }] });
       tester.start(); el.textContent = '■ Stop';
     }
-    if (a === 'learnA' || a === 'learnB') { learn = a.slice(-1); stopTester(); render(); }
-    if (a === 'resetkeys') { S.keysA = []; S.keysB = []; store.save(); render(); toast('Tastele au revenit la implicit'); }
     if (a === 'export') exportData();
     if (a === 'trupa-link') go('/trupa');
     if (a === 'trupa-off') { if (confirm('Oprești trimiterea automată către Trupa? Piesele deja trimise rămân în Trupa.')) { S.trupa.enabled = false; store.save(); render(); } }
@@ -627,22 +637,8 @@ function SettingsView() {
       f.click();
     }
   };
-  const onKey = e => {
-    const lk = $('#lastkey'); if (lk) lk.innerHTML = `Ultima tastă primită: <span class="keycap">${esc(keyName(e.key))}</span>`;
-    if (!learn) return;
-    e.preventDefault();
-    const arr = learn === 'A' ? S.keysA : S.keysB;
-    const other = learn === 'A' ? S.keysB : S.keysA;
-    const def = learn === 'A' ? DEFAULT_KEYS_A : DEFAULT_KEYS_B;
-    const idx = other.indexOf(e.key); if (idx >= 0) other.splice(idx, 1);
-    if (!arr.includes(e.key) && !def.includes(e.key)) arr.push(e.key);
-    store.save();
-    toast(`Tasta ${keyName(e.key)} → buton ${learn}`);
-    learn = null; render();
-  };
-  window.addEventListener('keydown', onKey);
   return {
-    destroy() { stopTester(); window.removeEventListener('keydown', onKey); app.oninput = null; },
+    destroy() { stopTester(); app.oninput = null; },
     onShareStatus() { const c = document.getElementById('sharecard'); if (c) c.innerHTML = shareHtml(); },
     onTrupa() { const c = document.getElementById('trupacard'); if (c) c.innerHTML = trupaHtml(); },
   };
@@ -724,7 +720,7 @@ function TrupaLinkView() {
     if (a === 'apply' && !busy) {
       busy = true; render();
       try {
-        const r = await trupa.applyChoices(T, songs, choice);
+        const r = await trupa.applyChoices(T, songs, choice, store.data.setlists);
         T.enabled = true;
         T.lastError = r.errors.join(' · ');
         if (!r.errors.length) T.lastSync = Date.now();
