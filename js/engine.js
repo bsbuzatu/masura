@@ -43,7 +43,21 @@ export class ClickEngine {
 
   _create() {
     const AC = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AC({ latencyHint: 'interactive' });
+    // Buffer mare ('playback'), nu minim ('interactive'): pe scenă telefonul se încălzește (încărcare, ecran
+    // aprins, lumini) și iOS încetinește procesorul; cu un buffer de câteva ms Safari nu mai pregătește sunetul
+    // la timp și clickul devine granulat/pârâit după zeci de minute. Latența mai mare e compensată vizual
+    // de audibleNow(), iar clickurile sunt oricum programate pe ceasul audio, deci rămân precise.
+    // Rata fixată la cea a plăcii (M-Track Duo = 48 kHz) ca iOS să nu mai convertească în timp real.
+    this.ctxInfo = '';
+    const tries = [
+      [{ latencyHint: 'playback', sampleRate: 48000 }, 'playback@48k'],
+      [{ latencyHint: 'playback' }, 'playback'],
+      [undefined, 'implicit'],
+    ];
+    for (const [opts, label] of tries) {
+      try { this.ctx = opts ? new AC(opts) : new AC(); this.ctxInfo = label; break; }
+      catch (e) { console.warn('AudioContext', label, e && e.name); this.ctx = null; }
+    }
     this.createdAt = performance.now();
     this.stalled = false; this._downAt = 0; this._advAt = 0; this._lastT = -1;
     this.out = this.ctx.createGain();
@@ -232,6 +246,14 @@ export class ClickEngine {
     src.connect(g); g.connect(this.out);
     src.start(Math.max(time, this.ctx.currentTime));
     return src;
+  }
+
+  // Diagnostic (ce a negociat iOS cu placa): rată, latență de bază, latență de ieșire.
+  diag() {
+    const c = this.ctx;
+    if (!c) return 'Audio: contextul nu e creat încă (apasă „Probează” întâi)';
+    const ms = v => v == null ? '—' : (v * 1000).toFixed(1) + ' ms';
+    return `Audio: ${c.sampleRate} Hz · ${this.ctxInfo || '?'} · stare ${c.state}\nbaseLatency ${ms(c.baseLatency)} · outputLatency ${ms(c.outputLatency)}`;
   }
 
   now() { return this.ctx ? this.ctx.currentTime : 0; }

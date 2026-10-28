@@ -35,6 +35,12 @@ export function PlayView(a, b, ctx) {
       <div class="link-dot" id="linkdot" hidden></div>
     </header>
     <div class="wake-warn" id="wakewarn" hidden>Atinge ecranul o dată ca să rămână aprins</div>
+    ${monitor ? `<section class="p-big" id="big">
+      <div class="b-notes" id="bnotes" hidden></div>
+      <div class="b-cur" id="bigcur"><div class="b-fill" id="bfill"></div><div class="b-in"><div class="b-top num" id="btop"></div><div class="b-name" id="bname"></div><div class="b-note" id="bnote"></div></div></div>
+      <div class="b-next" id="bnext"><div class="b-lbl" id="bnlbl"></div><div class="b-name" id="bnname"></div><div class="b-note" id="bnnote"></div></div>
+      <div class="b-hint" id="bhint">◀ glisează pentru structura completă</div>
+    </section>` : ''}
     <main class="p-main">
       <section class="p-now" id="now"><div class="flash" id="flash"></div><div class="bar-c" id="barc"></div><div id="nowc"></div></section>
       <aside class="p-side">
@@ -86,6 +92,82 @@ export function PlayView(a, b, ctx) {
   const wakeTimer = setInterval(keepAwake, 20000);
 
   const song = () => songs[idx];
+
+  // ---- monitor: vederea „ACUM / URMEAZĂ” (două blocuri mari, citibile din colțul scenei) ----
+  // Se deschide cu o glisare spre dreapta; glisare spre stânga = înapoi la structura completă.
+  // Modul ales rămâne salvat pe telefonul colegului.
+  const MODE_KEY = 'masura.monitor.view';
+  let bigMode = false, bigKey = '', bigSecKey = '';
+  const playEl = $('#play');
+  function setMode(big) {
+    bigMode = !!big;
+    playEl.classList.toggle('big', bigMode);
+    try { localStorage.setItem(MODE_KEY, bigMode ? 'big' : 'classic'); } catch (e) { /* ignore */ }
+  }
+  /*
+    cur:  { name, note, top, frac (0..1), count (număr mare în loc de nume), color, light (bețe), end, muted }
+    nxt:  { label, name, note } sau null (blocul rămâne gol)
+    secKey: identitatea secțiunii; când se schimbă în timpul piesei, blocul „urmează” urcă în locul celui curent.
+  */
+  function setBig(cur, nxt, secKey) {
+    if (!monitor) return;
+    const b = {
+      cur: $('#bigcur'), fill: $('#bfill'), top: $('#btop'), name: $('#bname'), note: $('#bnote'),
+      next: $('#bnext'), nlbl: $('#bnlbl'), nname: $('#bnname'), nnote: $('#bnnote'),
+    };
+    if (!b.cur) return;
+    const key = JSON.stringify([cur, nxt]);
+    if (key === bigKey) return;
+    bigKey = key;
+    const col = cur.color || '';
+    b.cur.className = 'b-cur' + (cur.light ? ' light' : '') + (cur.end ? ' end' : '') + (cur.muted ? ' muted' : '') + (cur.count != null ? ' counting' : '');
+    if (col && !cur.light && !cur.end && !cur.muted) b.cur.style.setProperty('--c', col); else b.cur.style.removeProperty('--c');
+    b.fill.style.width = `${Math.round(Math.max(0, Math.min(1, cur.frac || 0)) * 1000) / 10}%`;
+    b.top.textContent = cur.top || '';
+    b.name.textContent = cur.count != null ? String(cur.count) : (cur.name || '');
+    b.note.textContent = cur.note || '';
+    b.note.hidden = !cur.note;
+    if (nxt) {
+      b.next.classList.remove('empty');
+      b.nlbl.textContent = nxt.label || 'URMEAZĂ';
+      b.nname.textContent = nxt.name || '';
+      b.nnote.textContent = nxt.note || '';
+      b.nnote.hidden = !nxt.note;
+    } else {
+      b.next.classList.add('empty');
+      b.nlbl.textContent = ''; b.nname.textContent = ''; b.nnote.textContent = ''; b.nnote.hidden = true;
+    }
+    // secțiune nouă: blocul curent „vine de jos” (locul blocului „urmează”)
+    const sk = secKey || '';
+    if (sk && bigSecKey && sk !== bigSecKey) {
+      b.cur.classList.remove('slide'); void b.cur.offsetWidth; b.cur.classList.add('slide');
+    }
+    bigSecKey = sk;
+  }
+  function setBigNotes(s) {
+    const n = $('#bnotes');
+    if (!n) return;
+    const notes = s ? String(s.notes || '').trim() : '';
+    n.textContent = notes; n.hidden = !notes;
+  }
+  const secLen = sec => sec.open ? '↻ deschisă' : sec.bars === 1 ? '1 măsură' : `${sec.bars} măsuri`;
+  const nextOf = (s, i) => {
+    const n = s.sections[i];
+    return n ? { label: `URMEAZĂ · ${secLen(n)}`, name: n.name || '—', note: n.note || '' } : { label: 'URMEAZĂ', name: 'END', note: '' };
+  };
+  const sticksBlock = (s, extra) => ({ name: 'BEȚE', top: extra || `count-in ${s.countSticks}`, light: true, frac: 0 });
+  if (monitor) {
+    let saved = '';
+    try { saved = localStorage.getItem(MODE_KEY) || ''; } catch (e) { /* ignore */ }
+    setMode(saved === 'big');
+    let sx = 0, sy = 0, st = 0;
+    playEl.addEventListener('touchstart', e => { const t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); }, { passive: true });
+    playEl.addEventListener('touchend', e => {
+      const t = e.changedTouches[0]; const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Date.now() - st > 800 || Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.8) return;
+      setMode(dx > 0);
+    }, { passive: true });
+  }
 
   function buildStrip() {
     const s = song();
@@ -173,6 +255,8 @@ export function PlayView(a, b, ctx) {
     els.nowc.innerHTML = `<div class="p-ready"><div class="big">${esc(msg)}</div></div>`;
     els.bcur.textContent = '–'; els.btot.textContent = '';
     dots(4);
+    setBigNotes(null);
+    setBig({ name: msg, muted: true, frac: 0 }, null, '');
   }
 
   function showReady() {
@@ -199,6 +283,11 @@ export function PlayView(a, b, ctx) {
     dots(s.num);
     const first = s.sections[0];
     setNext('ÎNCEPE CU', first ? first.name : '—', first ? secBarsLabel(first) : '', false);
+    // vederea mare: bețele (sau prima secțiune, dacă nu sunt bețe) + ce urmează, neumplute
+    setBigNotes(s);
+    if (s.countSticks > 0) setBig(sticksBlock(s, finishedAll ? '✓ final de concert' : 'înainte de START'), nextOf(s, 0), 'ready');
+    else if (first) setBig({ name: first.name || '—', note: first.note || '', top: secLen(first), color: colorFor(first), frac: 0 }, nextOf(s, 1), 'ready');
+    else setBig({ name: s.title, muted: true, frac: 0 }, null, 'ready');
     updateControls();
     emit();
   }
@@ -245,6 +334,9 @@ export function PlayView(a, b, ctx) {
       }
       els.bcur.textContent = ev.i + 1;
       lightDot(ev.i);
+      // pregătirea e doar pentru toboșar: colegii văd blocul bețelor în așteptare
+      if (s.countSticks > 0) setBig(sticksBlock(s, 'pregătire…'), nextOf(s, 0), 'sticks');
+      else if (s.sections[0]) setBig({ name: s.sections[0].name || '—', note: s.sections[0].note || '', top: 'pregătire…', color: colorFor(s.sections[0]), frac: 0 }, nextOf(s, 1), 'sec0');
     } else if (ev.kind === 'sticks') {
       if (lastShown.kind !== 'sticks') {
         els.now.className = 'p-now last-bar';
@@ -257,6 +349,7 @@ export function PlayView(a, b, ctx) {
       els.nowc.innerHTML = `<div class="sec-name num sticks-n">${ev.i + 1}</div><div class="status">Bețe pentru band</div>`;
       els.bcur.textContent = ev.i + 1;
       lightDot(ev.i);
+      setBig({ name: 'BEȚE', top: `BEȚE · ${ev.total}`, light: true, frac: (ev.i + 1) / ev.total, count: ev.total - ev.i }, nextOf(s, 0), 'sticks');
     } else if (ev.kind === 'beat') {
       const sec = s.sections[ev.sec];
       const nxt = s.sections[ev.sec + 1];
@@ -286,6 +379,12 @@ export function PlayView(a, b, ctx) {
         lastShown.key = key;
       }
       lightDot(ev.beat);
+      if (monitor) {
+        // blocul se umple măsură cu măsură; în ultima măsură numele lasă locul numărătorii 4·3·2·1
+        const frac = isLast ? 1 : sec.open ? ((ev.bar % 4) + 1) / 4 : (ev.bar + 1) / sec.bars;
+        const top = sec.open ? `Măsura ${ev.bar + 1} ↻${isLast ? ' · ultima' : ''}` : `Măsura ${ev.bar + 1} / ${sec.bars}${isLast ? ' · ultima' : ''}`;
+        setBig({ name: sec.name || '—', note: sec.note || '', top, color: colorFor(sec), frac, count: isLast ? s.num - ev.beat : null }, nextOf(s, ev.sec + 1), `sec${ev.sec}`);
+      }
     }
     lastShown.kind = ev.kind;
     if (ev.kind === 'beat') lastShown.sec = ev.sec;
@@ -314,7 +413,12 @@ export function PlayView(a, b, ctx) {
   function songEnded() {
     player.stop();
     player.lastBeatTime = -1; els.flash.style.opacity = 0;
-    if (monitor) { runKey = ''; showWaiting(idx < songs.length - 1 ? 'Urmează piesa următoare…' : '✓ Final de concert'); return; }
+    if (monitor) {
+      runKey = '';
+      showWaiting(idx < songs.length - 1 ? 'Urmează piesa următoare…' : '✓ Final de concert');
+      setBig({ name: 'END', end: true, frac: 1, top: idx < songs.length - 1 ? 'urmează piesa următoare' : 'final de concert' }, null, 'end');
+      return;
+    }
     if (idx < songs.length - 1) { idx++; finishedAll = false; }
     else finishedAll = true;
     showReady();

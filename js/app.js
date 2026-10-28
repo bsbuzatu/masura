@@ -6,7 +6,7 @@ import { Broadcaster, newCode } from './share.js';
 import * as trupa from './trupa.js';
 import { MetroView, makeTapper, tapTime } from './metro.js';
 
-export const APP_VERSION = '1.12.0';
+export const APP_VERSION = '1.14.0';
 const store = new Store();
 const S = store.data.settings;
 const engine = new ClickEngine(S.vol);
@@ -573,15 +573,23 @@ function SettingsView() {
       </div>
 
       <h2 class="sec-h">Despre</h2>
-      <div class="card"><div class="hint" style="margin:0">Măsura v${APP_VERSION} · funcționează complet offline după instalare.<br>
+      <div class="card"><div class="hint" style="margin:0"><span id="ver" style="-webkit-user-select:none;user-select:none">Măsura v${APP_VERSION}</span> · funcționează complet offline după instalare.<br>
         iPhone: deschide în Safari → Share → „Add to Home Screen”. Folosește apoi mereu iconița de pe ecran (datele aplicației instalate sunt separate de cele din Safari).<br>
-        Înainte de concert: Setări iPhone → Display &amp; Brightness → Auto-Lock → Never, și căștile pe fir.</div></div>
+        Înainte de concert: Setări iPhone → Display &amp; Brightness → Auto-Lock → Never, și căștile pe fir.</div>
+        <div class="hint" id="diag" hidden style="white-space:pre-line"></div></div>
     </div>${tabs('settings')}</div>`;
   };
   render();
 
   let tester = null;
   const stopTester = () => { if (tester) tester.stop(); tester = null; };
+
+  // Diagnostic audio (doar la cerere): ține apăsat ~0,8 s pe versiune → rata și latențele negociate cu placa
+  let diagT = null;
+  const showDiag = () => { const d = $('#diag'); if (!d) return; d.hidden = false; d.textContent = engine.diag(); };
+  app.addEventListener('pointerdown', e => { if (e.target.id === 'ver') { clearTimeout(diagT); diagT = setTimeout(showDiag, 800); } });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => app.addEventListener(t, () => clearTimeout(diagT)));
+  app.addEventListener('contextmenu', e => { if (e.target.id === 'ver') e.preventDefault(); });
 
   app.oninput = e => {
     if (e.target.id === 'clickch') { engine.setChannel(e.target.value); store.save(); return; }
